@@ -1,0 +1,107 @@
+[
+ {
+  "id": "treatment_groups",
+  "name": "Treatment groups (column table)",
+  "description": "Four independent groups, one column each — t tests, one-way ANOVA, column graphs.",
+  "file": "treatment_groups.csv",
+  "hint": "column"
+ },
+ {
+  "id": "paired_bp",
+  "name": "Blood pressure before / after (paired)",
+  "description": "The same 15 patients measured twice — paired t test, Wilcoxon, before–after graph.",
+  "file": "paired_bp.csv",
+  "hint": "paired"
+ },
+ {
+  "id": "two_way",
+  "name": "Treatment × sex (two-way)",
+  "description": "Long-format data with two factors — two-way ANOVA, grouped graphs.",
+  "file": "two_way.csv",
+  "hint": "grouped"
+ },
+ {
+  "id": "dose_response",
+  "name": "Dose–response (two compounds)",
+  "description": "Triplicate responses at ten concentrations — 4PL curve fit, EC50.",
+  "file": "dose_response.csv",
+  "hint": "xy"
+ },
+ {
+  "id": "survival",
+  "name": "Survival (two arms)",
+  "description": "Time-to-event data with censoring — Kaplan–Meier, log-rank, Cox regression.",
+  "file": "survival.csv",
+  "hint": "survival"
+ },
+ {
+  "id": "regression",
+  "name": "Blood pressure, age and BMI (regression)",
+  "description": "Continuous outcome with several predictors — correlation, linear and multiple regression.",
+  "file": "regression.csv",
+  "hint": "xy"
+ },
+ {
+  "id": "contingency",
+  "name": "Response by treatment (contingency)",
+  "description": "Two categorical variables — chi-square, Fisher's exact test, relative risk, odds ratio.",
+  "file": "contingency.csv",
+  "hint": "contingency"
+ },
+ {
+  "id": "enzyme_kinetics",
+  "name": "Enzyme kinetics (Michaelis–Menten)",
+  "description": "Velocity at eight substrate concentrations, in triplicate.",
+  "file": "enzyme_kinetics.csv",
+  "hint": "xy"
+ },
+ {
+  "id": "diagnostic",
+  "name": "Diagnostic markers (ROC)",
+  "description": "Two biomarkers in healthy and diseased subjects — ROC curves.",
+  "file": "diagnostic.csv",
+  "hint": "roc"
+ },
+ {
+  "id": "volcano",
+  "name": "Differential expression (volcano)",
+  "description": "log2 fold change and P value for 1,500 genes.",
+  "file": "volcano.csv",
+  "hint": "volcano"
+ },
+ {
+  "id": "repeated_measures",
+  "name": "Repeated measures (three time points)",
+  "description": "Each row is one subject measured at baseline, week 4 and week 8 — RM ANOVA, Friedman.",
+  "file": "repeated_measures.csv",
+  "hint": "paired"
+ },
+ {
+  "id": "biomarker_panel",
+  "name": "Biomarker panel (multivariate)",
+  "description": "Six correlated biomarkers in three tumor subtypes — correlation matrix, PCA, heat map.",
+  "file": "biomarker_panel.csv",
+  "hint": "multivariate"
+ },
+ {
+  "id": "method_comparison",
+  "name": "Method comparison (Bland–Altman)",
+  "description": "The same samples measured with two assays.",
+  "file": "method_comparison.csv",
+  "hint": "agreement"
+ },
+ {
+  "id": "subgroups",
+  "name": "Subgroup hazard ratios (forest plot)",
+  "description": "Hazard ratios with 95% confidence limits for a forest plot.",
+  "file": "subgroups.csv",
+  "hint": "forest"
+ },
+ {
+  "id": "tumor_response",
+  "name": "Best tumor response (waterfall)",
+  "description": "Best percent change in tumor size per patient.",
+  "file": "tumor_response.csv",
+  "hint": "waterfall"
+ }
+]
