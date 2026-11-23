@@ -81,7 +81,7 @@ run <- function(data, options) {
       labels = c(F = if (variant == "welch") "W (Welch's F)" else "F* (Brown\u2013Forsythe)", df1 = "df (numerator)",
                  df2 = "df (denominator)", p = "P value", stars = "Summary"),
       footnotes = paste0(test_name, "; does not assume equal SDs. The denominator df is ",
-                         if (variant == "welch") "Welch's" else "Satterthwaite's", " approximation."))
+                         if (variant == "welch") "Welch's approximation." else "Satterthwaite's approximation; the numerator df is k \u2212 1 (as in Brown & Forsythe 1974)."))
     aui_table("Sums of squares", data.frame(
       Source = c("Between groups (treatment)", "Within groups (residual)", "Total"),
       SS = c(s$ssb, s$ssw, s$sst), df = c(s$dfb, s$dfw, s$N - 1), MS = c(msb, msw, NA), stringsAsFactors = FALSE),

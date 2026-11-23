@@ -74,14 +74,18 @@ render_histogram <- function(ctx) {
   }
   theme_extra <- NULL
   if (style == "facet") {
-    layers <- c(layers, list(facet_wrap(~group, ncol = 1)))
+    rows <- max(1, floor(P$h / (ctx$f$tick * 5.5)))            # panels need a minimal height
+    ncol <- ceiling(k / min(rows, k))
+    layers <- c(layers, list(facet_wrap(~group, ncol = ncol)))
+    ax_y <- axis_on_page(ax_y, P$h / ceiling(k / ncol) - ctx$f$tick * 2.2, FALSE)
+    ax_x <- axis_on_page(ax_x, P$w / ncol - 6, TRUE)
     if (ctx$th$frame == "L" && ctx$th$axis_width > 0 && !ax_y$is_log) {
       layers <- c(layers, list(geom_hline(yintercept = ax_y$lim[1], colour = ctx$th$axis, linewidth = lw(ctx$th$axis_width) * 2)))
     }
     theme_extra <- theme(panel.spacing.y = grid::unit(ctx$f$tick * 0.6, "pt"))
   }
   p <- xy_assemble(ctx, ax_x, ax_y, layers, legend, keys, scales = scales, theme_extra = theme_extra)
-  if (legend != "none") p <- p + guides(fill = guide_legend(order = 1), colour = "none")
+  if (legend != "none") p <- p + guides(fill = legend_guide(ctx, legend, keys, order = 1), colour = "none")
   p
 }
 register("histogram", render_histogram)
@@ -149,7 +153,7 @@ render_density <- function(ctx) {
   ggplot() + ref_lines(ctx, ax_x, NULL) + layers +
     axis_scale(ctx, ax_x) +
     scale_y_continuous(breaks = k - seq_len(k), labels = keys, expand = c(0, 0)) +
-    colour_scales(ctx, keys) +
+    colour_scales(ctx, keys, legend = legend) +
     coord_cartesian(xlim = ax_x$lim, ylim = ylim, expand = FALSE) +
     gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = angle) +
     theme(axis.line.y = element_blank(), axis.ticks.y = element_blank(), panel.grid.major.y = element_blank(),

@@ -69,7 +69,7 @@ run <- function(data, options) {
   }
 
   if (aui_flag(options, "item_stats", TRUE)) {
-    rest <- vapply(seq_len(k), function(j) if (k > 2 || TRUE) stats::cor(x[, j], total - x[, j]) else NA_real_, numeric(1))
+    rest <- vapply(seq_len(k), function(j) stats::cor(x[, j], total - x[, j]), numeric(1))
     dropped <- vapply(seq_len(k), function(j) if (k > 2) .cronbach(cv[-j, -j, drop = FALSE]) else NA_real_, numeric(1))
     it <- data.frame(Item = lab, mean = colMeans(x), sd = apply(x, 2, stats::sd), rest = rest, dropped = dropped,
                      note = ifelse(reversed, "reversed", ifelse(!is.na(dropped) & dropped > a + 1e-9, "alpha rises if dropped", "")),
@@ -82,7 +82,7 @@ run <- function(data, options) {
 
   if (aui_flag(options, "show_plot")) {
     d <- expand.grid(a = factor(lab, levels = lab), b = factor(lab, levels = rev(lab)))
-    d$r <- as.vector(r[, rev(seq_len(k))])
+    d$r <- as.vector(r)
     pl <- ggplot2::ggplot(d, ggplot2::aes(a, b, fill = r)) + ggplot2::geom_tile(colour = "white") +
       ggplot2::geom_text(ggplot2::aes(label = formatC(r, format = "f", digits = 2)), size = 3) +
       ggplot2::scale_fill_gradient2(low = AUI_COLORS[2], mid = "white", high = AUI_COLORS[1], limits = c(-1, 1), name = "r") +

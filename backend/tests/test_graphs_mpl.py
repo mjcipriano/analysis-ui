@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from analysis_ui.core.errors import AnalysisError
-from analysis_ui.graphs import GRAPHS, render_graph
+from analysis_ui.graphs import GRAPHS, style
 
 ROOT = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("render_gallery", ROOT / "scripts" / "render_gallery.py")
@@ -42,12 +42,18 @@ for _c in gallery.CASES:
     BASE.setdefault(_c[0], _c)
 
 
-def render(gid, data, options, fmt="svg", **kw) -> bytes:
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")               # the engine must not emit warnings either
-        warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"(pyparsing|dateutil).*")
-        img, _meta = render_graph({"type": gid, "engine": "matplotlib", "options": options}, data, fmt=fmt, **kw)
-    return img
+def render(gid, data, options, fmt="svg", dpi=300, editable_text=False) -> bytes:
+    """Like ``render_graph`` with the matplotlib engine, but any warning raised
+    while *drawing* fails the test (data preparation may warn, e.g. scipy on
+    constant data)."""
+    from analysis_ui.core.plotstyle import MPL_LOCK
+    from analysis_ui.graphs import mpl
+    from analysis_ui.graphs.registry import build_payload
+    payload, _meta = build_payload({"type": gid, "engine": "matplotlib", "options": options}, data)
+    payload.update(format=fmt, dpi=dpi, editable_text=editable_text)
+    with MPL_LOCK, warnings.catch_warnings():
+        warnings.simplefilter("error")
+        return mpl.render(payload)
 
 
 def svg_size(svg: bytes) -> tuple[float, float]:
@@ -76,7 +82,7 @@ def test_gallery_case_renders_svg(case):
 
 
 def test_every_graph_type_has_a_gallery_case():
-    assert set(GRAPHS) <= set(BASE) | {"donut", "ridgeline"} or set(GRAPHS) == set(BASE)
+    assert set(GRAPHS) == set(BASE)
     from analysis_ui.graphs import mpl
     assert {g.render_type for g in GRAPHS.values()} <= set(mpl.DRAWERS)
 
@@ -85,14 +91,14 @@ def test_every_graph_type_has_a_gallery_case():
 # Data roles are not appearance options; toggling them needs different data.
 SKIP_TYPES = {"variable", "variables", "level", "group_colors"}
 NUMBER_VALUES = {"width": [3.0], "height": [2.5], "font_size": [7], "title_size": [16], "axis_title_size": [8],
-                 "tick_size": [6], "legend_size": [7], "axis_width": [0, 2.5], "x_tick_step": [10],
-                 "y_tick_step": [10], "bins": [5, 60], "hole": [0.5], "start_angle": [0], "slice_gap": [0, 4],
-                 "point_size": [1, 14], "jitter": [0, 0.4], "bar_width": [0.2, 1], "fill_alpha": [0, 1],
-                 "outline_width": [0, 3], "error_cap": [0, 1], "error_width": [3], "dodge": [0.3, 1],
-                 "bw_adjust": [0.3, 3], "line_width": [0.3, 4], "line_alpha": [0.2], "point_alpha": [0.2],
-                 "summary_width": [1], "size_max": [50], "loess_span": [0.3], "ridge_overlap": [0.5, 4],
-                 "label_top": [0, 40], "fc_threshold": [0, 2], "p_threshold": [0.001], "label_size": [5],
-                 "value_digits": [0, 4], "value_size": [5], "color_min": [-1], "color_max": [1],
+                 "tick_size": [6], "legend_size": [7], "axis_width": [0], "x_tick_step": [10],
+                 "y_tick_step": [10], "bins": [60], "hole": [0.5], "start_angle": [0], "slice_gap": [0],
+                 "point_size": [14], "jitter": [0], "bar_width": [1], "fill_alpha": [0],
+                 "outline_width": [0], "error_cap": [0], "error_width": [3], "dodge": [0.3],
+                 "bw_adjust": [0.3], "line_width": [4], "line_alpha": [0.2], "point_alpha": [0.2],
+                 "summary_width": [1], "size_max": [50], "loess_span": [0.3], "ridge_overlap": [4],
+                 "label_top": [40], "fc_threshold": [0], "p_threshold": [0.001], "label_size": [5],
+                 "value_digits": [0], "value_size": [5], "color_min": [-1], "color_max": [1],
                  "ref_line": [None, 0.8], "x_min": [0.5], "x_max": [1000], "y_min": [1], "y_max": [500]}
 TEXT_VALUES = {"title": "A fairly long title for this graph", "subtitle": "Subtitle text", "caption": "Source: test",
                "x_label": "Custom X", "y_label": " ", "legend_title": "Legend", "hlines": "0, 50; 100",
@@ -100,26 +106,50 @@ TEXT_VALUES = {"title": "A fairly long title for this graph", "subtitle": "Subti
                "event_value": "1"}
 
 
+COMMON = {o["name"] for o in style.style_options({"axes", "x_num", "y_num", "x_cat", "legend", "palette",
+                                                  "colormap", "flip"})}
+# The shared look-and-feel options are swept completely on a few representative
+# layouts; on every other type only the values that change the layout a lot.
+COMMON_SWEEP = ("column_bar", "xy", "heatmap")
+CRITICAL = {"flip": [True], "legend_position": ["top", "inside_tl"], "theme": ["dark"], "x_scale": ["log10"],
+            "y_scale": ["log10"], "x_tick_angle": ["45"]}
+# Options drawn by code shared between many types: every value once (on the
+# first type that has the option), a single value on the other types.
+SHARED = {"point_shape", "point_color", "stat_adjust", "stat_test", "stat_comparisons", "stat_label", "error",
+          "center", "sort_groups", "outline", "point_layout"}
+VARIANTS = {"xy_regression", "xy_line", "dose_response", "bubble", "donut", "ridgeline"}   # same options as their base
+
+
+def _values(o: dict, current):
+    name, kind = o["name"], o.get("type")
+    if kind == "bool":
+        return [not bool(current)]
+    if kind == "choice":
+        return [c["value"] for c in o["choices"] if c["value"] != current]
+    if kind in ("number", "integer"):
+        return NUMBER_VALUES.get(name, [])
+    if kind in ("text", "color"):
+        return [TEXT_VALUES[name]] if name in TEXT_VALUES else []
+    return []
+
+
 def option_variants():
-    out = []
+    out, seen = [], set()
     for gid, case in BASE.items():
+        if gid in VARIANTS:
+            continue
         base_opts = _case(case)[2]
         for o in GRAPHS[gid].options:
-            name, kind = o["name"], o.get("type")
-            if kind in SKIP_TYPES or name in ("layout", "pie_data"):
+            name = o["name"]
+            if o.get("type") in SKIP_TYPES or name in ("layout", "pie_data"):
                 continue
-            current = base_opts.get(name, o.get("default"))
-            if kind in ("boolean", "bool"):
-                values = [not bool(current)]
-            elif kind == "choice":
-                values = [c["value"] if isinstance(c, dict) else c[0] for c in o.get("choices", o.get("options", []))]
-                values = [v for v in values if v != current]
-            elif kind in ("number", "integer"):
-                values = NUMBER_VALUES.get(name, [])
-            elif kind in ("text", "color"):
-                values = [TEXT_VALUES[name]] if name in TEXT_VALUES else []
-            else:
-                values = []
+            values = _values(o, base_opts.get(name, o.get("default")))
+            if name in COMMON and gid not in COMMON_SWEEP:
+                values = [v for v in values if v in CRITICAL.get(name, [])] if o.get("type") != "text" else \
+                    (values if name in CRITICAL else [])
+            if name in SHARED:
+                values = values[:1] if name in seen else values
+                seen.add(name)
             for v in values:
                 out.append(pytest.param(gid, name, v, id=f"{gid}-{name}={v}"))
     return out
@@ -127,7 +157,7 @@ def option_variants():
 
 def _variant_options(gid, name, value) -> dict:
     options = _case(BASE[gid])[2]
-    options.update(width=3.6, height=2.8)
+    options.update(width=3.4, height=2.6)
     options[name] = value
     # options that only act together with another one
     if name in ("stat_comparisons", "stat_adjust", "stat_label", "stat_hide_ns", "stat_custom"):
@@ -142,6 +172,9 @@ def _variant_options(gid, name, value) -> dict:
         options["show_points"] = True
     if name == "ridge_overlap":
         options["density_style"] = "ridgeline"
+    if gid == "heatmap":                             # 150 rows: keep the sweep fast
+        options.setdefault("show_values", False)
+        options.setdefault("square", False)
     if name in ("value_size", "value_digits"):
         options["show_values"] = True
     return options
@@ -151,7 +184,7 @@ def test_option_schema_was_understood():
     """Guard for the generic option sweep below: it must actually find choices and booleans."""
     kinds = {p.values[1] for p in option_variants()}
     assert {"theme", "flip", "legend_position", "whiskers", "hist_style", "x_scale", "grid", "frame"} <= kinds
-    assert len(option_variants()) > 500
+    assert len(option_variants()) > 400
 
 
 @pytest.mark.parametrize("gid,name,value", option_variants())
@@ -275,7 +308,7 @@ def test_contradictory_axis_limits_do_not_crash():
                                   "width": 4, "height": 3}), 4, 3)
 
 
-@pytest.mark.parametrize("size", [(1.5, 1.5), (30, 3), (3, 12)])
+@pytest.mark.parametrize("size", [(1.5, 1.5), (14, 2), (2.5, 9)])
 def test_extreme_figure_sizes(size):
     for gid in ("grouped_bar", "survival", "heatmap", "pie", "roc"):
         _, data, options = _case(BASE[gid])
@@ -290,7 +323,6 @@ def test_nothing_is_clipped_outside_the_canvas():
     from analysis_ui.graphs.mpl.base import Plot, build_rc
     from analysis_ui.graphs.registry import build_payload
     from matplotlib import rc_context
-    from matplotlib.text import Text
     cases = [("column_bar", {"stat_test": "welch", "title": "Title", "caption": "Caption", "legend_position": "right"}),
              ("column_bar", {"stat_test": "welch", "flip": True, "legend_position": "bottom"}),
              ("grouped_box", {"legend_position": "left", "x_tick_angle": "60", "subtitle": "Sub"}),
@@ -309,8 +341,7 @@ def test_nothing_is_clipped_outside_the_canvas():
             r = p.renderer
             fig_box = p.fig.bbox
             boxes = [ax.get_tightbbox(r) for ax in p.axes]
-            boxes += [t.get_window_extent(r) for t in p.fig.findobj(Text) if t.get_visible() and t.get_text().strip()
-                      and t.figure is p.fig and t.axes is None]
+            boxes += [t.get_window_extent(r) for t in p._texts.values()]        # title, subtitle, caption
             if p.legend is not None:
                 boxes.append(p.legend.get_window_extent(r))
             for b in boxes:

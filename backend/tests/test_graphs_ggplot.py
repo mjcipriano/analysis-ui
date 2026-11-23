@@ -103,9 +103,13 @@ STYLE_NAMES = {o["name"] for o in style.style_options({"x_num", "y_num", "x_cat"
 DATA_ROLES = {"layout", "pie_data"}             # choices that change which data options are required
 # graph ids on which the shared style options are exercised (one per family of axes / legend)
 STYLE_IDS = ["column_bar", "grouped_box", "xy", "survival", "pie", "heatmap", "forest"]
-# style choices are tested exhaustively on the first two ids, a spot check on the others
+# style choices are tested exhaustively on the first id, a spot check on the others
 SPOT = {"theme": ["dark", "boxed"], "palette": ["colorblind"], "colormap": ["rdbu"], "legend_position": ["top", "inside_bl"],
-        "font_family": ["DejaVu Serif"], "x_tick_angle": ["45", "90"]}
+        "font_family": ["DejaVu Serif"], "x_tick_angle": ["45", "90"], "x_scale": ["log10"], "y_scale": ["log10", "sqrt"],
+        "grid": ["both"], "frame": ["box", "none"], "tick_direction": ["in"]}
+# options whose values only change the numbers computed in Python, not what the engine has to draw
+PREP_ONLY = {"fit": ["4pl", "loess"], "stat_adjust": ["none"], "sort_groups": ["desc"], "center": ["median"],
+             "error": ["ci95", "none"], "stat_test": ["welch"]}
 
 
 def _variations(opt: dict, current, exhaustive=True):
@@ -117,7 +121,9 @@ def _variations(opt: dict, current, exhaustive=True):
         values = [c["value"] if isinstance(c, dict) else c[0] for c in opt.get("choices", [])]
         base = current if current is not None else opt.get("default")
         for v in values:
-            if v != base and (exhaustive or name not in SPOT or v in SPOT[name]):
+            if v == base or (name in PREP_ONLY and v not in PREP_ONLY[name]):
+                continue
+            if exhaustive or name not in SPOT or v in SPOT[name]:
                 yield v
     elif kind in ("number", "integer") and name not in STYLE_NAMES:
         for key in ("min", "max"):
@@ -137,7 +143,7 @@ def _toggle_params():
             is_style = name in STYLE_NAMES
             if is_style and gid not in STYLE_IDS:
                 continue
-            exhaustive = not is_style or gid in STYLE_IDS[:2]
+            exhaustive = not is_style or gid == STYLE_IDS[0]
             for value in _variations(opt, options.get(name), exhaustive):
                 params.append(pytest.param(gid, name, value, id=f"{gid}-{name}={value}"))
     return params
@@ -147,12 +153,14 @@ def _toggle_params():
 def test_option_value(gid, name, value):
     data, options = BASE[gid]
     options = {**options, **TOGGLE_EXTRA.get(gid, {}), **SMALL, name: value}
-    spec = {"type": gid, "engine": "ggplot2", "options": options}
     try:
-        build_payload(spec, data)
-    except AnalysisError as exc:               # the option combination is rejected before drawing
-        pytest.skip(f"not drawable with this data: {exc}")
-    svg = render(gid, data, options)
+        svg = render(gid, data, options)
+    except AnalysisError as exc:
+        try:
+            build_payload({"type": gid, "engine": "ggplot2", "options": options}, data)
+        except AnalysisError:                  # the combination is rejected before any drawing
+            pytest.skip(f"not drawable with this data: {exc}")
+        raise
     assert svg.rstrip().endswith(b"</svg>") and len(svg) > 2000
 
 

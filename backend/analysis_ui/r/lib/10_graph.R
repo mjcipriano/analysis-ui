@@ -25,7 +25,7 @@ if (!isTRUE(l10n_info()[["UTF-8"]])) {
 .aui_gg$ready <- requireNamespace("ggplot2", quietly = TRUE)
 if (.aui_gg$ready) {
   suppressWarnings(suppressPackageStartupMessages(library(ggplot2)))
-  for (.p in c("scales", "systemfonts", "ragg", "beeswarm", "ggrepel", "ggforce", "patchwork")) {
+  for (.p in c("scales", "systemfonts", "ragg", "beeswarm", "ggrepel", "patchwork", "svglite")) {
     try(suppressWarnings(suppressPackageStartupMessages(loadNamespace(.p))), silent = TRUE)
   }
   rm(.p)

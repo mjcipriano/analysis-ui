@@ -8,10 +8,14 @@ xy_assemble <- function(ctx, ax_x, ax_y, layers, legend, keys, key_labels = NULL
                         scales = list(), coord = NULL, theme_extra = NULL, dark = TRUE,
                         x_breaks = NULL, y_breaks = NULL) {
   angle <- tick_angle(opt_chr(ctx$o, "x_tick_angle", "auto"))
+  P <- xy_panel(ctx, ax_y, legend, key_labels %||% keys, key_w)
+  if (is.null(ax_x$len_pt)) ax_x <- axis_on_page(ax_x, P$w, is.null(angle))
+  if (is.null(ax_y$len_pt)) ax_y <- axis_on_page(ax_y, P$h, FALSE)
   ggplot() + ref_lines(ctx, ax_x, ax_y) + layers +
     axis_scale(ctx, ax_x, breaks = x_breaks, labels = if (!is.null(x_breaks)) fmt_num(x_breaks)) +
     axis_scale(ctx, ax_y, breaks = y_breaks, labels = if (!is.null(y_breaks)) fmt_num(y_breaks)) +
-    colour_scales(ctx, keys, labels = key_labels, extra = c(if (dark) dark_extra(ctx, keys), extra_cols)) + scales +
+    colour_scales(ctx, keys, labels = key_labels, extra = c(if (dark) dark_extra(ctx, keys), extra_cols),
+                  legend = legend, key_w = key_w) + scales +
     (coord %||% coord_cartesian(xlim = ax_x$lim, ylim = ax_y$lim, expand = FALSE)) +
     gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = angle, key_w = key_w) + theme_extra
 }
@@ -169,13 +173,14 @@ render_xy <- function(ctx) {
   }
 
   title <- if (nzchar(ctx$labels$legend)) ctx$labels$legend else NULL
+  guide <- legend_guide(ctx, legend, legend_labels, key_w)       # same guide on every scale, so the legends merge
   scales <- list()
   if (lt_map) scales <- c(scales, list(scale_linetype_manual(
     values = stats::setNames(LINETYPES[(seq_along(keys) - 1) %% length(LINETYPES) + 1], keys),
-    breaks = keys, labels = legend_labels, name = title, drop = FALSE)))
+    breaks = keys, labels = legend_labels, name = title, drop = FALSE, guide = guide)))
   if (shape_opt == "auto" && !bubbles) scales <- c(scales, list(scale_shape_manual(
     values = stats::setNames(SHAPE_CYCLE[(seq_along(keys) - 1) %% length(SHAPE_CYCLE) + 1], keys),
-    breaks = keys, labels = legend_labels, name = title, drop = FALSE)))
+    breaks = keys, labels = legend_labels, name = title, drop = FALSE, guide = guide)))
   if (bubbles) {
     size_title <- opt_chr(o, "size", "Size")
     scales <- c(scales, list(
@@ -187,12 +192,7 @@ render_xy <- function(ctx) {
   p <- xy_assemble(ctx, ax_x, ax_y, layers, legend, keys, key_labels = stats::setNames(legend_labels, keys),
                    key_w = key_w, scales = scales)
   if (bubbles) p <- p + theme(legend.title = element_text(colour = ctx$th$text, size = ctx$f$legend, face = "bold"))
-  if (legend == "bottom" && !is.null(fit_labels)) {
-    g <- guide_legend(ncol = 1, byrow = TRUE)
-    p <- p + guides(colour = g, fill = g, linetype = if (lt_map) g else "none",
-                    shape = if (shape_opt == "auto" && !bubbles) g else "none") +
-      theme(legend.spacing.y = grid::unit(ctx$f$legend * 0.45, "pt"))
-  }
+  if (!is.null(fit_labels)) p <- p + theme(legend.spacing.y = grid::unit(ctx$f$legend * 0.45, "pt"))
   p
 }
 register("xy", render_xy)

@@ -185,7 +185,8 @@ axis_spec <- function(ctx, which, rng, zero = FALSE, flush = FALSE, mult = c(0.0
   if (zero && !is_log) rng <- range(rng, 0)
   t <- tf$tr(rng)
   span <- diff(t)
-  if (!is.finite(span) || span <= 0) {            # constant data: open a sensible window
+  if (!is.finite(span) || span <= max(abs(t), 1e-300) * 1e-9) {   # constant data: open a sensible window
+    t <- rep(mean(t), 2)
     pad <- if (is_log) 0.5 else if (rng[1] == 0) 1 else abs(rng[1]) * 0.1
     if (scale == "sqrt") pad <- max(sqrt(abs(rng[1])) * 0.1, 0.5)
     t <- t + c(-pad, pad)
@@ -274,12 +275,26 @@ axis_breaks <- function(ctx, ax, minor_ok = TRUE) {
   }
   br <- NULL
   if (!is.na(step) && step > 0 && diff(lim) / step <= 150) {
-    br <- seq(ceiling(lim[1] / step - 1e-9) * step, lim[2] + step * 1e-9, by = step)
-    br <- round(br, 12)
+    first <- ceiling(lim[1] / step - 1e-9) * step
+    if (first <= lim[2]) br <- round(seq(first, lim[2] + step * 1e-9, by = step), 12)
   }
-  if (is.null(br)) br <- scales::extended_breaks(n = 5)(lim)
-  br <- inside(br)
+  if (is.null(br)) {
+    # fewer ticks when the labels would not fit along the axis (ax$len_pt, when known)
+    for (n in c(5, 4, 3, 2)) {
+      br <- inside(scales::extended_breaks(n = n)(lim))
+      if (is.null(ax$len_pt) || length(br) <= 2) break
+      need <- if (isTRUE(ax$horizontal)) sum(text_w(ctx, fmt_num(br), ctx$f$tick)) + length(br) * ctx$f$tick * 0.9
+              else length(br) * ctx$f$tick * 1.25
+      if (need <= ax$len_pt) break
+    }
+  } else br <- inside(br)
   list(breaks = br, labels = fmt_num(br))
+}
+
+# tell an axis how long it is on the page (pt) and whether its labels run along it
+axis_on_page <- function(ax, len_pt, horizontal) {
+  ax$len_pt <- len_pt; ax$horizontal <- horizontal
+  ax
 }
 
 # continuous position scale for a resolved axis (never expands: the limits are final)
@@ -290,7 +305,11 @@ axis_scale <- function(ctx, ax, breaks = NULL, labels = NULL, minor_ok = TRUE, .
     if (is.null(labels)) labels <- b$labels
   }
   fn <- if (ax$which == "x") scale_x_continuous else scale_y_continuous
-  fn(trans = ax$trans, breaks = breaks, labels = labels %||% waiver(), expand = c(0, 0), ...)
+  if (!length(breaks) || length(labels) != length(breaks)) {
+    if (!length(breaks)) return(fn(trans = ax$trans, breaks = NULL, expand = c(0, 0), ...))
+    labels <- fmt_num(breaks)
+  }
+  fn(trans = ax$trans, breaks = breaks, labels = labels, expand = c(0, 0), ...)
 }
 
 # keep only values that can be drawn on the axis' scale
@@ -440,14 +459,36 @@ gg_labs <- function(ctx, x = ctx$labels$x, y = ctx$labels$y) {
 # manual colour + fill scales sharing breaks and labels, so legends merge.
 #   extra   additional named colours that may be mapped but never appear in the legend
 #   labels  named character vector overriding legend labels
-colour_scales <- function(ctx, keys = names(ctx$cols), labels = NULL, extra = NULL, aesthetics = c("colour", "fill")) {
+colour_scales <- function(ctx, keys = names(ctx$cols), labels = NULL, extra = NULL, aesthetics = c("colour", "fill"),
+                          legend = "none", key_w = 1) {
   vals <- c(group_cols(ctx, keys), extra)
   lab <- if (is.null(labels)) keys else { l <- labels[keys]; l[is.na(l)] <- keys[is.na(l)]; unname(l) }
   title <- if (nzchar(ctx$labels$legend)) ctx$labels$legend else NULL
+  guide <- legend_guide(ctx, legend, lab, key_w)
   lapply(aesthetics, function(a) {
     scale_discrete_manual(aesthetics = a, values = vals, breaks = keys, labels = lab, name = title,
-                          drop = FALSE, na.value = ctx$muted)
+                          drop = FALSE, na.value = ctx$muted, guide = guide)
   })
+}
+
+# A legend guide whose number of columns makes the keys fit on the page:
+# side legends wrap into columns when they are taller than the figure,
+# top / bottom legends use as many columns as the width allows.
+legend_guide <- function(ctx, legend, labels, key_w = 1, ...) {
+  n <- length(labels)
+  if (legend == "none" || n < 2) return(guide_legend(...))
+  f <- ctx$f
+  key <- f$legend * 1.25
+  lines <- max(1, lengths(strsplit(as.character(labels), "\n", fixed = TRUE)))
+  entry_w <- max_text_w(ctx, labels, f$legend) + key * key_w + f$legend * 1.3
+  if (legend %in% c("top", "bottom")) {
+    title_w <- if (nzchar(ctx$labels$legend)) max_text_w(ctx, ctx$labels$legend, f$legend, TRUE) + f$legend else 0
+    ncol <- max(1, min(n, floor((ctx$W * 72 - 16 - title_w) / entry_w)))
+    return(guide_legend(ncol = ncol, byrow = TRUE, ...))
+  }
+  rows <- max(1, floor((ctx$H * 72 * (if (grepl("^inside", legend)) 0.6 else 0.85)) / (max(key, f$legend * 1.15 * lines) + f$legend * 0.1)))
+  if (n <= rows) return(guide_legend(...))
+  guide_legend(ncol = ceiling(n / rows), ...)
 }
 
 # ---- size of the panel, estimated (points) -----------------------------------
@@ -471,12 +512,14 @@ panel_size <- function(ctx, left_w = NULL, bottom_h = NULL, right = 0, top = 0, 
     key <- f$legend * 1.25
     lw_each <- text_w(ctx, labs, f$legend) + key * key_w + f$legend * 0.8
     title_w <- if (nzchar(L$legend)) max_text_w(ctx, L$legend, f$legend, bold = TRUE) else 0
+    n <- length(labs)
     if (legend %in% c("right", "left")) {
-      w <- max(c(lw_each, title_w), 0) + f$legend * 0.8 + 6
+      rows <- max(1, floor(ctx$H * 72 * 0.85 / (key + f$legend * 0.1)))
+      w <- max(c(max(lw_each, 0) * ceiling(n / rows), title_w), 0) + f$legend * 0.8 + 6
       if (legend == "right") rightm <- rightm + w else left <- left + w
     } else {
-      h <- key + f$legend * 0.8 + 6
-      if (sum(lw_each) + title_w > ctx$W * 72 - left - rightm) h <- h + key   # wraps (roughly)
+      ncol <- max(1, min(n, floor((ctx$W * 72 - 16 - title_w) / (max(lw_each, 1) + f$legend * 0.5))))
+      h <- key * ceiling(n / ncol) + f$legend * 0.8 + 6
       if (legend == "top") topm <- topm + h else bottom <- bottom + h
     }
   }
@@ -672,18 +715,15 @@ bracket_layers <- function(ctx, br, ax, panel_len_pt) {
       placed <- c(placed, i)
     }
   }
+  # never give more than 55 % of the axis to brackets: with very many of them the levels are squeezed
+  max_level <- max(br$level)
+  budget <- panel_len_pt * 0.55 - gap0 - max(text_h) - 4
+  if (max_level > 0 && max_level * step > budget) step <- max(budget / max_level, 1)
   off_pt <- gap0 + br$level * step                 # bracket line above its zone top
-  need_pt <- off_pt + text_h + 4
-  lo <- ax$tlim[1]; hi0 <- ax$tlim[2]
-  hi <- hi0
-  for (it in 1:25) {                               # fixed point: units per pt depend on the span
-    u <- (hi - lo) / panel_len_pt
-    need <- max(br$top + need_pt * u)
-    new_hi <- max(hi0, need)
-    if (abs(new_hi - hi) < 1e-9 * max(1, abs(hi))) break
-    hi <- new_hi
-    if ((hi - lo) > (hi0 - lo) * 8) break          # tiny panel: give up growing
-  }
+  # the axis has to end at `hi` with top + need * (hi - lo) / panel_len <= hi for every bracket
+  frac <- pmin((off_pt + text_h + 4) / panel_len_pt, 0.8)
+  lo <- ax$tlim[1]
+  hi <- max(ax$tlim[2], (br$top - frac * lo) / (1 - frac))
   ax <- axis_extend_top(ax, hi)
   u <- diff(ax$tlim) / panel_len_pt
   y <- br$top + off_pt * u

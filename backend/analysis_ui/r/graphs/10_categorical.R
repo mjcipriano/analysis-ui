@@ -602,6 +602,7 @@ render_categorical <- function(ctx, kind_fn, grouped) {
 cat_assemble <- function(ctx, S, ax, M, layers, legend, keys, key_w = 1, extra_cols = NULL, key_labels = NULL,
                          show_cat_labels = TRUE, theme_extra = NULL) {
   xlim <- c(1 - CAT_PAD, S$n + CAT_PAD)
+  ax <- axis_on_page(ax, M$vlen, ctx$flip && is.null(M$angle))
   if ((M$cat_every %||% 1) > 1) S$xl[(seq_len(S$n) - 1) %% M$cat_every != 0] <- ""
   if (!is.null(M$cat_size) && M$cat_size < ctx$f$tick) {
     theme_extra <- list(theme_extra, if (ctx$flip) theme(axis.text.y = element_text(size = M$cat_size))
@@ -615,7 +616,8 @@ cat_assemble <- function(ctx, S, ax, M, layers, legend, keys, key_w = 1, extra_c
     scale_x_continuous(breaks = if (show_cat_labels) seq_len(S$n) else NULL, labels = if (show_cat_labels) S$xl else NULL,
                        expand = c(0, 0), trans = if (ctx$flip) "reverse" else "identity") +
     axis_scale(ctx, ax) +
-    colour_scales(ctx, keys, labels = key_labels, extra = c(dark_extra(ctx, keys), extra_cols)) +
+    colour_scales(ctx, keys, labels = key_labels, extra = c(dark_extra(ctx, keys), extra_cols),
+                  legend = legend, key_w = key_w) +
     (if (ctx$flip) coord_flip(xlim = rev(xlim), ylim = ax$lim, expand = FALSE)
      else coord_cartesian(xlim = xlim, ylim = ax$lim, expand = FALSE)) +
     gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = M$angle, key_w = key_w) + theme_extra

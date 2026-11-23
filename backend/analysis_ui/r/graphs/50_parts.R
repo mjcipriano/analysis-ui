@@ -13,7 +13,7 @@ render_pie <- function(ctx) {
   sl$text <- ifelse(is.na(sl$text), "", as.character(sl$text))
   hole <- min(max(opt_num(o, "hole", 0), 0), 0.95)
   outside <- opt_chr(o, "label_position", "inside") == "outside"
-  # angles: 0 = 12 o'clock, clockwise (ggforce); the option is degrees counter-clockwise from 3 o'clock
+  # angles: 0 = 12 o'clock, clockwise; the option is degrees counter-clockwise from 3 o'clock
   a0 <- (90 - opt_num(o, "start_angle", 90)) * pi / 180
   frac <- sl$value / sum(sl$value)
   sl$end <- a0 + cumsum(frac) * 2 * pi
@@ -32,31 +32,52 @@ render_pie <- function(ctx) {
   n_lines <- lengths(strsplit(sl$text, "\n", fixed = TRUE)); n_lines[!has_text] <- 0
   th_pt <- n_lines * lab_pt * 1.15
   reach <- 1.12                                                    # outside labels start at this radius
-  R <- min(P$w, P$h) / 2 * 0.97                                    # radius in points
-  if (outside && any(has_text)) {
-    R <- min((P$w / 2 - max(tw) - 6) / (reach + 0.06), (P$h / 2 - max(th_pt) / 2 - 2) / (reach - 0.02), R)
+  r_in <- if (hole > 0.05) (hole + 1) / 2 else 0.62                # where inside labels sit
+  # does a horizontal label fit inside its slice when the radius is R points?
+  fits_inside <- function(R) {
+    tang <- tw * abs(cos(sl$mid)) + th_pt * abs(sin(sl$mid))       # extent along the arc
+    rad <- tw * abs(sin(sl$mid)) + th_pt * abs(cos(sl$mid))        # extent along the radius
+    room_r <- (if (hole > 0.05) 1 - hole else 0.74) * R
+    arc <- (sl$end - sl$start) * pmax(r_in * R - rad / 2, 1)
+    ok <- (tang + 3 <= arc | (sl$end - sl$start) >= pi) & rad + 3 <= room_r
+    if (n == 1) ok[] <- TRUE
+    ok & has_text
   }
-  R <- max(R, 18)
+  R <- min(P$w, P$h) / 2 * 0.97                                    # radius in points
+  goes_out <- has_text & (outside | !fits_inside(R))
+  out_pt <- lab_pt
+  if (any(goes_out)) {                                             # make room for the outside labels
+    # a crowded side: smaller text (down to 72 %) before labels are pushed far from their slices
+    need <- max(tapply(th_pt[goes_out] + 2, sin(sl$mid[goes_out]) >= 0, sum))
+    shrink <- max(0.72, min(1, (P$h - 4) / need))
+    out_pt <- lab_pt * shrink
+    tw[goes_out] <- tw[goes_out] * shrink; th_pt[goes_out] <- th_pt[goes_out] * shrink
+    R <- min((P$w / 2 - max(tw[goes_out]) - 6) / (reach + 0.08), (P$h / 2 - max(th_pt[goes_out]) / 2 - 2) / (reach - 0.02), R)
+    R <- max(R, 18)
+    goes_out <- has_text & (outside | !fits_inside(R))
+  }
   xlim <- c(-1, 1) * P$w / 2 / R; ylim <- c(-1, 1) * P$h / 2 / R   # data units: radius = 1
 
   gap_pt <- opt_num(o, "slice_gap", 1)
   sep <- if (ctx$th$transparent) "#FFFFFF" else ctx$th$bg
-  arc_args <- list(mapping = aes(x0 = 0, y0 = 0, r0 = hole, r = 1, start = .data$start, end = .data$end, fill = .data$key),
-                   data = sl, show.legend = TRUE, n = 360)
-  if (n > 1 && gap_pt > 0) { arc_args$colour <- sep; arc_args$linewidth <- lw(gap_pt) }
-  else { arc_args$mapping$colour <- quote(.data$key); arc_args$linewidth <- lw(0.3) }
-  layers <- list(do.call(ggforce::geom_arc_bar, arc_args))
+  # wedges as polygons (radius 1); the gap is a stroke in the background colour
+  wedges <- do.call(rbind, lapply(seq_len(n), function(i) {
+    a <- seq(sl$start[i], sl$end[i], length.out = max(3, ceiling((sl$end[i] - sl$start[i]) / (2 * pi) * 360) + 1))
+    inner <- if (hole > 0) cbind(hole * sin(rev(a)), hole * cos(rev(a))) else cbind(0, 0)
+    xy <- rbind(cbind(sin(a), cos(a)), inner)
+    data.frame(x = xy[, 1], y = xy[, 2], key = sl$key[i], id = i)
+  }))
+  m <- aes(x = .data$x, y = .data$y, group = .data$id, fill = .data$key)
+  wargs <- list(data = wedges, show.legend = TRUE, linejoin = "mitre")
+  if (n > 1 && gap_pt > 0) { wargs$colour <- sep; wargs$linewidth <- lw(gap_pt) }
+  else { m$colour <- quote(.data$key); wargs$linewidth <- lw(0.3) }
+  wargs$mapping <- m
+  layers <- list(do.call(geom_polygon, wargs))
 
   if (any(has_text)) {
-    r_in <- if (hole > 0.05) (hole + 1) / 2 else 0.62
-    d <- sl[has_text, , drop = FALSE]
-    d$tw <- tw[has_text]; d$th <- th_pt[has_text]
-    # does the label fit inside its slice?
-    arc_pt <- (d$end - d$start) * r_in * R
-    fits <- arc_pt >= pmin(d$tw, d$th * 1.6) + 2 & (1 - hole) * R >= pmin(d$tw, d$th) + 3
-    if (n == 1) fits <- TRUE
-    inside <- d[!outside & fits, , drop = FALSE]
-    out <- d[outside | !fits, , drop = FALSE]
+    sl$th <- th_pt
+    inside <- sl[has_text & !goes_out, , drop = FALSE]
+    out <- sl[goes_out, , drop = FALSE]
     if (nrow(inside)) {
       inside$x <- r_in * sin(inside$mid); inside$y <- r_in * cos(inside$mid)
       if (n == 1 && hole <= 0.05) { inside$x <- 0; inside$y <- 0 }
@@ -67,34 +88,40 @@ render_pie <- function(ctx) {
     if (nrow(out)) {
       out$right <- sin(out$mid) >= 0
       out$ex <- sin(out$mid); out$ey <- cos(out$mid)                # point on the rim
-      out$ly <- (reach - 0.02) * out$ey                             # label height, then de-overlapped per side
-      for (side in c(TRUE, FALSE)) {
+      out$ly <- (reach - 0.02) * out$ey                             # wanted label height
+      lo <- ylim[1] + 2 / R; hi <- ylim[2] - 2 / R
+      for (side in c(TRUE, FALSE)) {                                # spread the labels of each side apart
         i <- which(out$right == side)
-        if (length(i) < 2) next
+        if (!length(i)) next
         i <- i[order(out$ly[i])]
-        need <- (out$th[i] / R) * 0.5
-        for (j in seq_along(i)[-1]) {
-          min_y <- out$ly[i[j - 1]] + need[j - 1] + need[j] + 2 / R
-          if (out$ly[i[j]] < min_y) out$ly[i[j]] <- min_y
+        h <- out$th[i] / R + 2 / R                                  # height each label needs (data units)
+        y <- out$ly[i]
+        if (sum(h) >= hi - lo) {                                    # too many: share the height evenly
+          y <- lo + (cumsum(h) - h / 2) * (hi - lo) / sum(h)
+        } else {
+          y[1] <- max(y[1], lo + h[1] / 2)
+          for (j in seq_along(i)[-1]) y[j] <- max(y[j], y[j - 1] + (h[j - 1] + h[j]) / 2)   # push up
+          m <- length(i)
+          y[m] <- min(y[m], hi - h[m] / 2)
+          for (j in rev(seq_along(i))[-1]) y[j] <- min(y[j], y[j + 1] - (h[j + 1] + h[j]) / 2)   # push back down
         }
-        over <- max(out$ly[i] + need) - (ylim[2] - 2 / R)          # shift back into the panel if pushed out
-        if (over > 0) out$ly[i] <- out$ly[i] - over
+        out$ly[i] <- y
       }
       dir <- ifelse(out$right, 1, -1)
-      out$kx <- pmax(abs((reach - 0.04) * out$ex), sqrt(pmax(1.03^2 - pmin(abs(out$ly), 1.03)^2, 0))) * dir
-      out$lx <- pmax(abs(out$kx), reach * abs(out$ex)) * dir + 0.06 * dir
-      seg <- rbind(data.frame(x = 1.0 * out$ex, y = 1.0 * out$ey, xend = out$kx, yend = out$ly),
+      out$kx <- pmax(abs((reach - 0.04) * out$ex), sqrt(pmax(1.04^2 - pmin(abs(out$ly), 1.04)^2, 0))) * dir
+      out$lx <- (abs(out$kx) + 0.06) * dir
+      seg <- rbind(data.frame(x = out$ex, y = out$ey, xend = out$kx, yend = out$ly),
                    data.frame(x = out$kx, y = out$ly, xend = out$lx - 0.015 * dir, yend = out$ly))
       layers <- c(layers, list(
         geom_segment(aes(x = .data$x, y = .data$y, xend = .data$xend, yend = .data$yend), data = seg,
                      colour = ctx$muted, linewidth = lw(0.6), lineend = "round"),
         geom_text(aes(x = .data$lx + 0.02 * dir, y = .data$ly, label = .data$text), data = out,
-                  hjust = ifelse(out$right, 0, 1), colour = ctx$th$text, size = ts(lab_pt), family = f$family,
+                  hjust = ifelse(out$right, 0, 1), colour = ctx$th$text, size = ts(out_pt), family = f$family,
                   lineheight = 0.95)))
     }
   }
   ggplot() + layers +
-    colour_scales(ctx, keys) +
+    colour_scales(ctx, keys, legend = legend) +
     scale_x_continuous(expand = c(0, 0)) + scale_y_continuous(expand = c(0, 0)) +
     coord_fixed(xlim = xlim, ylim = ylim, expand = FALSE, clip = "off") +
     gg_labs(ctx, x = "", y = "") + gg_theme(ctx, legend = legend, void = TRUE) +

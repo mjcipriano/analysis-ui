@@ -35,8 +35,6 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.transforms import Bbox
 
-from ...core.errors import AnalysisError
-
 FALLBACK_COLOR = "#3B6FE0"
 Z_REF, Z_BAND, Z_FILL, Z_LINE, Z_POINT, Z_SUMMARY, Z_TEXT = 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0
 
@@ -325,20 +323,40 @@ class Plot:
             w, h = max(w, lw), h + max(lh, size * self.px * 1.0) * 1.15
         return w, h
 
+    def wrap(self, text: str, size: float, max_px: float, bold: bool = False) -> str:
+        """Greedy word wrap so that long titles and captions stay on the canvas."""
+        out = []
+        for para in str(text).split("\n"):
+            line = ""
+            for word in para.split(" "):
+                trial = f"{line} {word}" if line else word
+                if line and self.text_size(trial, size, bold)[0] > max_px:
+                    out.append(line)
+                    line = word
+                else:
+                    line = trial
+            out.append(line)
+        return "\n".join(out)
+
     # ---------------------------------------------------------------- begin
     def begin(self):
         f, th = self.fonts, self.theme
         fig = self.fig
         ha = "center" if th.get("title_align") == "center" else "left"
+        room = self.fig.bbox.width - 1.5 * f["base"] * self.px
         if self.labels.get("title"):
-            self._texts["title"] = fig.text(0.5, 1, self.labels["title"], ha=ha, va="top", fontsize=f["title"],
-                                            fontweight="bold" if th.get("title_bold") else "normal", color=self.ink)
+            bold = bool(th.get("title_bold"))
+            self._texts["title"] = fig.text(0.5, 1, self.wrap(self.labels["title"], f["title"], room, bold), ha=ha,
+                                            va="top", fontsize=f["title"], color=self.ink, linespacing=1.15,
+                                            fontweight="bold" if bold else "normal")
         if self.labels.get("subtitle"):
-            self._texts["subtitle"] = fig.text(0.5, 1, self.labels["subtitle"], ha=ha, va="top",
-                                               fontsize=f["subtitle"], color=mix(self.ink, self.bg, 0.25))
+            self._texts["subtitle"] = fig.text(0.5, 1, self.wrap(self.labels["subtitle"], f["subtitle"], room),
+                                               ha=ha, va="top", fontsize=f["subtitle"], linespacing=1.15,
+                                               color=mix(self.ink, self.bg, 0.25))
         if self.labels.get("caption"):
-            self._texts["caption"] = fig.text(0, 0, self.labels["caption"], ha="left", va="bottom",
-                                              fontsize=f["caption"], color=mix(self.ink, self.bg, 0.3))
+            self._texts["caption"] = fig.text(0, 0, self.wrap(self.labels["caption"], f["caption"], room),
+                                              ha="left", va="bottom", fontsize=f["caption"], linespacing=1.15,
+                                              color=mix(self.ink, self.bg, 0.3))
         self.ax = self.new_axes()
         self.placer = self._place_single
         return self
@@ -932,8 +950,7 @@ class Plot:
             xy = self.xy((a + b) / 2, v_line)
             if self.flip:
                 ax.annotate(lab, xy, xytext=(1.5 if not stars else -0.12 * size, 0), textcoords="offset points",
-                            ha="left", va="center", rotation=270, rotation_mode="anchor" if False else "default",
-                            fontsize=size, color=self.ink, zorder=Z_TEXT, annotation_clip=False)
+                            ha="left", va="center", rotation=270, fontsize=size, color=self.ink, zorder=Z_TEXT, annotation_clip=False)
             else:
                 ax.annotate(lab, xy, xytext=(0, 1.5 if not stars else -0.36 * size), textcoords="offset points",
                             ha="center", va="bottom", fontsize=size, color=self.ink, zorder=Z_TEXT,
@@ -1030,10 +1047,3 @@ def tidy_labels(labels) -> list[str]:
     if out and all(s.endswith(".0") and s[:-2].lstrip("-").isdigit() for s in out):
         out = [s[:-2] for s in out]
     return out
-
-
-def require(frame, name: str = "data"):
-    """Friendly error for an empty frame."""
-    if frame is None or len(frame) == 0:
-        raise AnalysisError("There is nothing to plot yet.")
-    return frame

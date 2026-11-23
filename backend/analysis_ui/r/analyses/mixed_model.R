@@ -52,6 +52,11 @@ run <- function(data, options) {
     aui_stop("Some fixed effects cannot be estimated because they are perfectly confounded (for example empty combinations of factor levels, or a predictor that duplicates another). Remove an interaction or one of the confounded predictors.")
   }
   singular <- lme4::isSingular(fit)
+  few <- random[vapply(random, function(g) nlevels(droplevels(data[[g]])) < 5, logical(1))]
+  if (length(few)) {
+    aui_warn(paste0("The grouping variable ", paste(vapply(few, function(g) st_name(names, g), ""), collapse = ", "),
+                    " has fewer than five levels, so its variance is estimated very imprecisely. With so few levels it is usually better treated as a fixed factor."))
+  }
   fit_t <- if (length(factors)) st_quiet(st_with_treatment_contrasts(lmerTest::lmer(form, data = data, REML = reml)))$value else fit
 
   # ---- model fit

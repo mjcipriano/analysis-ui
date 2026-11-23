@@ -169,5 +169,6 @@ run <- function(data, options) {
     txt <- paste0(txt, " Significant predictors: ", paste(sprintf("%s (OR %s, %s CI %s to %s)", best$Term, st_fmt(best$ratio, 3), st_pct(alpha),
                                                                  st_fmt(best$lower, 3), st_fmt(best$upper, 3)), collapse = "; "), ".")
   } else txt <- paste0(txt, " No individual predictor is statistically significant.")
+  if (separated) txt <- paste0(txt, " Caution: the data show (quasi-)complete separation, so the Wald P values and confidence intervals of the affected predictors are not reliable.")
   aui_summary(paste0(txt, auc_txt))
 }

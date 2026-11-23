@@ -72,11 +72,23 @@ render_survival <- function(ctx) {
   ybreaks <- if (is.na(step) && ax_y$scale == "linear" && !any(ax_y$user)) seq(0, top, length.out = 5) else NULL
   xbreaks <- if (show_risk && length(risk_times) && is.na(opt_num(o, "x_tick_step")) && ax_x$scale == "linear")
     risk_times[risk_times >= ax_x$lim[1] & risk_times <= ax_x$lim[2]] else NULL
+  if (show_risk && has_rows(risk)) {
+    # columns of the table must not run into each other on a narrow panel: keep every k-th time
+    shown <- if (is.null(xbreaks)) sort(unique(risk$time)) else xbreaks
+    col_w <- max(max_text_w(ctx, as.character(risk$n), ctx$f$tick), max_text_w(ctx, fmt_num(shown), ctx$f$tick)) + ctx$f$tick * 0.7
+    every <- max(1, ceiling(length(shown) * col_w / P$w))
+    if (every > 1) {
+      shown <- shown[(seq_along(shown) - 1) %% every == 0]
+      if (!is.null(xbreaks)) xbreaks <- shown
+      risk <- risk[risk$time %in% shown, , drop = FALSE]
+    }
+  }
+  ax_x <- axis_on_page(ax_x, P$w, TRUE); ax_y <- axis_on_page(ax_y, P$h, FALSE)
   angle <- tick_angle(opt_chr(o, "x_tick_angle", "auto"))
   x_scale <- function() if (is.null(xbreaks)) axis_scale(ctx, ax_x) else axis_scale(ctx, ax_x, breaks = xbreaks, labels = fmt_num(xbreaks))
   p <- ggplot() + ref_lines(ctx, ax_x, ax_y) + layers + x_scale() +
     (if (is.null(ybreaks)) axis_scale(ctx, ax_y) else axis_scale(ctx, ax_y, breaks = ybreaks, labels = fmt_num(ybreaks))) +
-    colour_scales(ctx, keys) +
+    colour_scales(ctx, keys, legend = legend, key_w = 2) +
     coord_cartesian(xlim = ax_x$lim, ylim = ax_y$lim, expand = FALSE) +
     gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = angle, key_w = 2)
   if (!show_risk) return(p)

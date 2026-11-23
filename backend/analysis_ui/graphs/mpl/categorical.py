@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .base import (Plot, Z_FILL, Z_LINE, Z_POINT, Z_SUMMARY, beeswarm, darken, kde_curve, mix,
+from .base import (Plot, Z_FILL, Z_LINE, Z_POINT, Z_SUMMARY, beeswarm, kde_curve, mix,
                    point_style, rgba)
 
 UP_COLOR, DOWN_COLOR = "#D7402B", "#2C6FBB"

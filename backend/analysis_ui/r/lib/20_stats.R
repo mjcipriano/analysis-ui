@@ -894,7 +894,7 @@ st_emit_varcomp <- function(fit, names, title = "Random effects (variance compon
                                " ~ ", st_pretty(vc$var2, names))))
   aui_table(title, data.frame(
     Group = grp, Effect = what, Variance = ifelse(is_var, vc$vcov, NA), SD = ifelse(is_var, vc$sdcor, NA),
-    Correlation = ifelse(is_var, NA, vc$sdcor),
+    Correlation = as.numeric(ifelse(is_var, NA, vc$sdcor)),
     share = ifelse(is_var & (is.na(vc$var1) | vc$var1 == "(Intercept)"), vc$vcov / total, NA),
     stringsAsFactors = FALSE),
     formats = c(share = "pct"), labels = c(share = "% of variance (intercepts + residual)"), footnotes = footnotes)

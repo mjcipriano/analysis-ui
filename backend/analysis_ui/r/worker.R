@@ -18,7 +18,7 @@ real_stdout <- stdout()
 sink(stderr(), type = "output")
 
 for (f in sort(list.files(file.path(AUI_R_DIR, "lib"), pattern = "\\.R$", full.names = TRUE))) {
-  source(f, local = FALSE)
+  source(f, local = FALSE, encoding = "UTF-8")
 }
 
 .aui_cache <- new.env()
@@ -33,7 +33,7 @@ aui_load <- function(subdir, script) {
   hit <- .aui_cache[[key]]
   if (is.null(hit) || hit$mtime != mtime) {
     env <- new.env(parent = globalenv())
-    sys.source(path, envir = env)
+    sys.source(path, envir = env, encoding = "UTF-8")
     hit <- list(env = env, mtime = mtime)
     .aui_cache[[key]] <- hit
   }
