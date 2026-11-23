@@ -23,7 +23,7 @@ Run the tests with `cd backend && .venv/bin/python -m pytest -q`.
 
 ```python
 # backend/analysis_ui/analyses/my_family.py   (every module here is auto-imported)
-from ..core import analysis, opt, Context, Results, AnalysisError, new_figure, COLORS, stars, fmt_p
+from ..core import analysis, opt, Context, Results, AnalysisError, new_figure, COLORS, stars, fmt_p, p_text
 
 @analysis(
     id="ttest_unpaired", name="Unpaired t test", category="Compare two groups",
