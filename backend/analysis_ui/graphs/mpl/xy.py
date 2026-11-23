@@ -157,10 +157,21 @@ def xy(p: Plot):
         lines = [(str(fit_labels[s_]).replace(" (R²", ", R²").rstrip(")") if " (R²" in str(fit_labels[s_])
                   else str(fit_labels[s_]), col) for s_, col, _ in fit_entries if s_ in fit_labels]
         fs = p.fonts["tick"] * 0.85
-        for k, (txt, col) in enumerate(lines):
-            ax.annotate(txt, (0, 1), xycoords="axes fraction", xytext=(0.5 * fs, -0.5 * fs - k * fs * 1.25),
-                        textcoords="offset points", ha="left", va="top", fontsize=fs,
-                        color=p.accent(col, 0.25), zorder=Z_SUMMARY + 1)
+        notes = []
+        for txt, col in lines:
+            notes.append(ax.annotate(txt, (0, 1), xycoords="axes fraction", xytext=(0, 0), textcoords="offset points",
+                                     ha="left", va="top", fontsize=fs, color=p.accent(col, 0.25),
+                                     zorder=Z_SUMMARY + 1))
+            notes[-1].set_in_layout(False)           # must not push the panels apart
+
+        def fit_notes(ax=ax):                        # shrink to the panel width, then stack the lines
+            widest = max(p.text_size(t.get_text(), fs)[0] for t in notes)
+            size = max(min(fs, fs * (ax.bbox.width - fs * p.px) / max(widest, 1.0)), 4.0)
+            for k, t in enumerate(notes):
+                t.set_fontsize(size)
+                t.xyann = (0.5 * size, -0.5 * size - k * size * 1.25)
+        fit_notes()
+        p.hooks[2].append(fit_notes)
     elif fit_entries and o.get("fit_legend", True):
         if len(series) == 1:
             p.legend_items = []

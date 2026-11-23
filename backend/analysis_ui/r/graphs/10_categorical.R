@@ -559,6 +559,7 @@ render_categorical <- function(ctx, kind_fn, grouped) {
   S <- cat_setup(ctx, grouped)
   K <- kind_fn(ctx, S)
   ax <- axis_spec(ctx, "y", K$range, zero = isTRUE(K$zero), flush = isTRUE(K$flush))
+  axes_ready(ctx, "base", y = ax)
   legend <- legend_position(ctx, if (grouped && S$k > 1) "right" else "none")
   key_w <- K$key_w %||% 1
   M <- cat_metrics(ctx, S, ax, legend, key_w)
@@ -594,6 +595,7 @@ render_categorical <- function(ctx, kind_fn, grouped) {
     }
   }
 
+  axes_ready(ctx, "final", y = ax)
   cat_assemble(ctx, S, ax, M, c(K$layers(ax, M), bl$layers), legend, S$gl, key_w)
 }
 
@@ -601,6 +603,16 @@ render_categorical <- function(ctx, kind_fn, grouped) {
 # position scales, colours, coordinate system (flipped or not), labels, theme.
 cat_assemble <- function(ctx, S, ax, M, layers, legend, keys, key_w = 1, extra_cols = NULL, key_labels = NULL,
                          show_cat_labels = TRUE, theme_extra = NULL) {
+  parts <- list(S = S, ax = ax, M = M, layers = layers, legend = legend, keys = keys, key_w = key_w,
+                extra_cols = extra_cols, key_labels = key_labels, show_cat_labels = show_cat_labels,
+                theme_extra = theme_extra)
+  if (isTRUE(ctx$collect)) parts else cat_finish(ctx, parts)
+}
+
+cat_finish <- function(ctx, parts) {
+  S <- parts$S; M <- parts$M; ax <- parts$ax; theme_extra <- parts$theme_extra
+  Fc <- ctx$facet
+  free_value <- !is.null(Fc) && Fc$free_y              # every panel has its own value axis
   xlim <- c(1 - CAT_PAD, S$n + CAT_PAD)
   ax <- axis_on_page(ax, M$vlen, ctx$flip && is.null(M$angle))
   if ((M$cat_every %||% 1) > 1) S$xl[(seq_len(S$n) - 1) %% M$cat_every != 0] <- ""
@@ -612,25 +624,36 @@ cat_assemble <- function(ctx, S, ax, M, layers, legend, keys, key_w = 1, extra_c
     pad <- max(5, ctx$f$base * 0.55)
     theme_extra <- list(theme_extra, theme(plot.margin = margin(pad, pad + 3, pad, pad + M$extra_left)))
   }
-  ggplot() + ref_lines(ctx, NULL, ax) + layers +
-    scale_x_continuous(breaks = if (show_cat_labels) seq_len(S$n) else NULL, labels = if (show_cat_labels) S$xl else NULL,
+  show <- parts$show_cat_labels
+  value_scale <- if (free_value) {
+    list(free_axis_scale(ctx, ax), facet_limits(lapply(parts$panels, function(p) p$ax), "y", Fc$levels))
+  } else axis_scale(ctx, ax)
+  coord <- if (ctx$flip) {
+    if (free_value) coord_flip(xlim = rev(xlim), expand = FALSE) else coord_flip(xlim = rev(xlim), ylim = ax$lim, expand = FALSE)
+  } else {
+    if (free_value) coord_cartesian(xlim = xlim, expand = FALSE) else coord_cartesian(xlim = xlim, ylim = ax$lim, expand = FALSE)
+  }
+  ggplot() + ref_lines(ctx, NULL, ax) + parts$layers +
+    scale_x_continuous(breaks = if (show) seq_len(S$n) else NULL, labels = if (show) S$xl else NULL,
                        expand = c(0, 0), trans = if (ctx$flip) "reverse" else "identity") +
-    axis_scale(ctx, ax) +
-    colour_scales(ctx, keys, labels = key_labels, extra = c(dark_extra(ctx, keys), extra_cols),
-                  legend = legend, key_w = key_w) +
-    (if (ctx$flip) coord_flip(xlim = rev(xlim), ylim = ax$lim, expand = FALSE)
-     else coord_cartesian(xlim = xlim, ylim = ax$lim, expand = FALSE)) +
-    gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = M$angle, key_w = key_w) + theme_extra
+    value_scale +
+    colour_scales(ctx, parts$keys, labels = parts$key_labels, extra = c(dark_extra(ctx, parts$keys), parts$extra_cols),
+                  legend = parts$legend, key_w = parts$key_w) +
+    coord + (if (!is.null(Fc)) facet_layers(ctx)) +
+    gg_labs(ctx) + gg_theme(ctx, legend = parts$legend, x_angle = M$angle, key_w = parts$key_w) + theme_extra
 }
 
-register("column_scatter", function(ctx) render_categorical(ctx, kind_scatter, FALSE))
-register("column_bar", function(ctx) render_categorical(ctx, kind_bar, FALSE))
-register("box", function(ctx) render_categorical(ctx, kind_box, FALSE))
-register("violin", function(ctx) render_categorical(ctx, kind_violin, FALSE))
-register("raincloud", function(ctx) render_categorical(ctx, kind_raincloud, FALSE))
-register("before_after", function(ctx) render_categorical(ctx, kind_before_after, FALSE))
-register("grouped_bar", function(ctx) render_categorical(ctx, kind_bar, TRUE))
-register("grouped_box", function(ctx) render_categorical(ctx, kind_box, TRUE))
-register("grouped_violin", function(ctx) render_categorical(ctx, kind_violin, TRUE))
-register("grouped_points", function(ctx) render_categorical(ctx, kind_scatter, TRUE))
-register("interaction_line", function(ctx) render_categorical(ctx, kind_interaction, TRUE))
+categorical <- function(kind_fn, grouped) {
+  function(ctx) with_facets(ctx, function(cx) render_categorical(cx, kind_fn, grouped), cat_finish, free_x_ok = FALSE)
+}
+register("column_scatter", categorical(kind_scatter, FALSE))
+register("column_bar", categorical(kind_bar, FALSE))
+register("box", categorical(kind_box, FALSE))
+register("violin", categorical(kind_violin, FALSE))
+register("raincloud", categorical(kind_raincloud, FALSE))
+register("before_after", categorical(kind_before_after, FALSE))
+register("grouped_bar", categorical(kind_bar, TRUE))
+register("grouped_box", categorical(kind_box, TRUE))
+register("grouped_violin", categorical(kind_violin, TRUE))
+register("grouped_points", categorical(kind_scatter, TRUE))
+register("interaction_line", categorical(kind_interaction, TRUE))

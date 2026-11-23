@@ -110,6 +110,7 @@ render_density <- function(ctx) {
 
   if (!ridges) {
     ax_y <- axis_spec(ctx, "y", finite_range(dens$y, 0), zero = TRUE, flush = TRUE, mult = c(0, 0.06))
+    axes_ready(ctx, "any", x = ax_x, y = ax_y)
     legend <- legend_position(ctx, if (k > 1) "right" else "none")
     P <- xy_panel(ctx, ax_y, legend, keys)
     base <- if (ax_y$is_log) ax_y$lim[1] else 0
@@ -134,6 +135,11 @@ render_density <- function(ctx) {
   dens$top <- dens$base + dens$y / peak * overlap
   ymax <- max(dens$top, k - 1 + 0.3)
   ylim <- c(-0.12 - (if (has_rows(rug)) 0.1 else 0), ymax + (ymax + 0.12) * 0.03)
+  # the rows live on a plain linear pseudo-axis (so panels of a facet grid can share or free it)
+  ax_y <- ctx$fixed_axes$y %||% list(which = "y", scale = "linear", tr = identity, inv = identity, trans = "identity",
+                                     lim = ylim, tlim = ylim, user = c(FALSE, FALSE), is_log = FALSE)
+  ylim <- ax_y$lim
+  axes_ready(ctx, "any", x = ax_x, y = ax_y)
   legend <- legend_position(ctx, "none")
   lab_w <- max_text_w(ctx, keys, ctx$f$tick)
   P <- panel_size(ctx, left_w = lab_w, legend = legend, legend_labels = keys)
@@ -149,17 +155,13 @@ render_density <- function(ctx) {
                                               yend = .data$base - tick * 1.25, colour = .data$key), data = rug,
                                           alpha = 0.7, linewidth = lw(0.6), show.legend = FALSE)))
   }
-  angle <- tick_angle(opt_chr(o, "x_tick_angle", "auto"))
-  ggplot() + ref_lines(ctx, ax_x, NULL) + layers +
-    axis_scale(ctx, ax_x) +
-    scale_y_continuous(breaks = k - seq_len(k), labels = keys, expand = c(0, 0)) +
-    colour_scales(ctx, keys, legend = legend) +
-    coord_cartesian(xlim = ax_x$lim, ylim = ylim, expand = FALSE) +
-    gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = angle) +
-    theme(axis.line.y = element_blank(), axis.ticks.y = element_blank(), panel.grid.major.y = element_blank(),
-          axis.text.y = element_text(vjust = 0, size = ctx$f$tick))
+  xy_assemble(ctx, ax_x, ax_y, layers, legend, keys, dark = FALSE,
+              y_scale = scale_y_continuous(breaks = k - seq_len(k), labels = keys, expand = c(0, 0)),
+              theme_extra = theme(axis.line.y = element_blank(), axis.ticks.y = element_blank(),
+                                  panel.grid.major.y = element_blank(),
+                                  axis.text.y = element_text(vjust = 0, size = ctx$f$tick)))
 }
-register("density", render_density)
+register("density", function(ctx) with_facets(ctx, render_density, xy_finish))
 
 render_qq <- function(ctx) {
   o <- ctx$o
@@ -169,6 +171,7 @@ render_qq <- function(ctx) {
   keys <- levels(qq$group)
   ax_x <- axis_spec(ctx, "x", finite_range(qq$theoretical))
   ax_y <- axis_spec(ctx, "y", finite_range(qq$sample))
+  axes_ready(ctx, "any", x = ax_x, y = ax_y)
   legend <- legend_position(ctx, if (length(keys) > 1) "right" else "none")
   qq <- qq[on_scale(ax_x, qq$theoretical) & on_scale(ax_y, qq$sample), , drop = FALSE]
   layers <- list()
@@ -187,7 +190,7 @@ render_qq <- function(ctx) {
                                         show.legend = TRUE)))
   xy_assemble(ctx, ax_x, ax_y, layers, legend, keys)
 }
-register("qq", render_qq)
+register("qq", function(ctx) with_facets(ctx, render_qq, xy_finish))
 
 render_ecdf <- function(ctx) {
   o <- ctx$o
@@ -198,6 +201,7 @@ render_ecdf <- function(ctx) {
   top <- if (opt_flag(ctx$computed, "percent")) 100 else 1
   ax_x <- axis_spec(ctx, "x", finite_range(d$x), mult = c(0.04, 0.04))
   ax_y <- axis_spec(ctx, "y", c(0, top), fixed = c(0, top * 1.03))
+  axes_ready(ctx, "any", x = ax_x, y = ax_y)
   legend <- legend_position(ctx, if (length(keys) > 1) "right" else "none")
   d <- d[on_scale(ax_x, d$x) & (on_scale(ax_y, d$y) | !ax_y$is_log), , drop = FALSE]
   d <- d[order(d$group, d$x, d$y), , drop = FALSE]
@@ -211,4 +215,4 @@ render_ecdf <- function(ctx) {
                            direction = "hv", linewidth = lw(opt_num(o, "line_width", 1.6)), show.legend = TRUE))
   xy_assemble(ctx, ax_x, ax_y, layers, legend, keys, key_w = 2)
 }
-register("ecdf", render_ecdf)
+register("ecdf", function(ctx) with_facets(ctx, render_ecdf, xy_finish))

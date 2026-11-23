@@ -141,8 +141,8 @@ def option_variants():
         base_opts = _case(case)[2]
         for o in GRAPHS[gid].options:
             name = o["name"]
-            if o.get("type") in SKIP_TYPES or name in ("layout", "pie_data"):
-                continue
+            if o.get("type") in SKIP_TYPES or name in ("layout", "pie_data") or name.startswith("facet"):
+                continue                             # facets have their own tests below
             values = _values(o, base_opts.get(name, o.get("default")))
             if name in COMMON and gid not in COMMON_SWEEP:
                 values = [v for v in values if v in CRITICAL.get(name, [])] if o.get("type") != "text" else \
@@ -364,3 +364,204 @@ def test_unknown_render_type_is_a_friendly_error():
     from analysis_ui.graphs import mpl
     with pytest.raises(AnalysisError):
         mpl.render({"type": "nope", "options": {}, "frames": {}, "computed": {}, "format": "svg"})
+
+
+# ------------------------------------------------------------------- facets
+def build(gid, data, options):
+    """Draw and lay out a graph, returning the finished ``Plot`` for inspection."""
+    from analysis_ui.core.plotstyle import MPL_LOCK
+    from analysis_ui.graphs import mpl
+    from analysis_ui.graphs.mpl.base import Plot, build_rc
+    from analysis_ui.graphs.registry import build_payload
+    from matplotlib import rc_context
+    payload, _ = build_payload({"type": gid, "options": options}, data)
+    payload.update(format="svg", dpi=100, editable_text=False)
+    o = payload["options"]
+    with MPL_LOCK, warnings.catch_warnings(), rc_context(rc=build_rc(o["_fonts"], o["_theme"], False)):
+        warnings.simplefilter("error")
+        p = Plot(payload).begin()
+        draw = mpl.DRAWERS[payload["type"]]
+        if p.computed.get("facets"):
+            p.draw_facets(draw)
+        else:
+            draw(p)
+        p.finish()
+        assert len(p.save()) > 1500
+        return p
+
+
+def assert_inside_canvas(p, tol=1.5):
+    r, fig = p.renderer, p.fig.bbox
+    boxes = [ax.get_tightbbox(r) for ax in p.axes] + [t.get_window_extent(r) for t in p._texts.values()]
+    if p.legend is not None:
+        boxes.append(p.legend.get_window_extent(r))
+    for b in boxes:
+        assert b.x0 >= fig.x0 - tol and b.y0 >= fig.y0 - tol and b.x1 <= fig.x1 + tol and b.y1 <= fig.y1 + tol, b
+
+
+COLUMN_FACET = {"layout": "long", "dep": "Response", "group": "Treatment", "facet": "Sex"}
+GROUPED_FACET = {"layout": "long", "dep": "Systolic BP", "x": "Sex", "group": "Hypertension", "facet": "Sex"}
+XY_FACET = {"x": "Age", "y": ["Systolic BP"], "group": "Sex", "facet": "Hypertension"}
+FACET_CASES = {
+    **{g: ("two_way", COLUMN_FACET) for g in ("column_scatter", "column_bar", "box", "violin", "raincloud",
+                                               "density", "ridgeline", "ecdf", "qq")},
+    "before_after": ("two_way", {"layout": "long", "dep": "Response", "group": "Sex", "facet": "Treatment"}),
+    **{g: ("regression", GROUPED_FACET) for g in ("grouped_bar", "grouped_box", "grouped_violin",
+                                                   "grouped_points", "interaction_line")},
+    "xy": ("regression", XY_FACET), "xy_regression": ("regression", XY_FACET),
+    "xy_line": ("regression", XY_FACET), "bubble": ("regression", {**XY_FACET, "size": "BMI"}),
+    "dose_response": ("dose_response", {"x": "Concentration (µM)", "y": ["Response (%)"], "facet": "Compound"}),
+}
+FLIPPABLE = [g for g in FACET_CASES if any(o["name"] == "flip" for o in GRAPHS[g].options)]
+STATS = [g for g in FACET_CASES if any(o["name"] == "stat_test" for o in GRAPHS[g].options)]
+
+
+def facet_case(gid, **extra):
+    sname, options = FACET_CASES[gid]
+    return gid, sample(sname), {**options, "width": 4.6, "height": 3.4, **extra}
+
+
+@pytest.mark.parametrize("gid", list(FACET_CASES))
+def test_facets_draw_one_panel_per_level(gid):
+    gid, data, options = facet_case(gid, title="Faceted", caption="Caption")
+    p = build(gid, data, options)
+    names = p.computed["facets"]
+    assert len(names) >= 2 and len(p.axes) == len(names)
+    assert [ax.get_title() for ax in p.axes] == [str(n) for n in names]
+    assert len({ax.get_xlim() for ax in p.axes}) == 1 and len({ax.get_ylim() for ax in p.axes}) == 1   # shared
+    assert all(not ax.get_xlabel() and not ax.get_ylabel() for ax in p.axes)      # one shared title per axis
+    assert_inside_canvas(p)
+    pos = [ax.get_position() for ax in p.axes]
+    for i, a in enumerate(pos):                      # panels never overlap
+        for b in pos[i + 1:]:
+            assert a.x1 <= b.x0 + 1e-6 or b.x1 <= a.x0 + 1e-6 or a.y1 <= b.y0 + 1e-6 or b.y1 <= a.y0 + 1e-6
+    check_svg(render(gid, data, options), 4.6, 3.4)
+
+
+@pytest.mark.parametrize("gid", FLIPPABLE)
+def test_facets_flipped(gid):
+    gid, data, options = facet_case(gid, flip=True, legend_position="bottom")
+    p = build(gid, data, options)
+    assert len(p.axes) == len(p.computed["facets"])
+    assert_inside_canvas(p)
+
+
+@pytest.mark.parametrize("mode", ["free_y", "free"])
+@pytest.mark.parametrize("gid", ["column_bar", "box", "grouped_points", "xy", "density", "ecdf", "qq"])
+def test_facets_free_axes(gid, mode):
+    gid, data, options = facet_case(gid, facet_axes=mode)
+    p = build(gid, data, options)
+    xl, yl = {ax.get_xlim() for ax in p.axes}, {ax.get_ylim() for ax in p.axes}
+    if gid != "ecdf":                                # (an ECDF always runs from 0 to 100 %)
+        assert len(yl) > 1                           # the two panels hold different data
+    if gid in ("xy", "density"):
+        assert (len(xl) == 1) == (mode == "free_y")
+    labelled = [ax for ax in p.axes if any(t.get_visible() and t.get_text() for t in ax.get_yticklabels())]
+    assert len(labelled) == len(p.axes)              # free scales: every panel shows its own tick labels
+    assert_inside_canvas(p)
+
+
+@pytest.mark.parametrize("flip", [False, True])
+@pytest.mark.parametrize("gid", STATS)
+def test_facets_with_brackets(gid, flip):
+    gid, data, options = facet_case(gid, stat_test="welch", flip=flip, y_scale="log10" if flip else "linear")
+    p = build(gid, data, options)
+    assert p.computed["brackets"] and all("facet" in b for b in p.computed["brackets"])
+    labels = {b["label"] for b in p.computed["brackets"]}
+    for ax, name in zip(p.axes, p.computed["facets"]):
+        mine = [b for b in p.computed["brackets"] if str(b["facet"]) == str(name)]
+        drawn = [t.get_text() for t in ax.texts if t.get_text() in labels]
+        assert len(drawn) == len(mine)               # each panel shows its own brackets, exactly once
+    assert len({(ax.get_xlim() if flip else ax.get_ylim()) for ax in p.axes}) == 1
+    assert_inside_canvas(p)
+
+
+@pytest.mark.parametrize("fit", ["linear", "loess"])
+def test_facets_with_fits(fit):
+    gid, data, options = facet_case("xy", fit=fit, facet_axes="free")
+    p = build(gid, data, options)
+    assert p.computed["fits"] and all("facet" in f for f in p.computed["fits"])
+    for ax, name in zip(p.axes, p.computed["facets"]):
+        notes = [t.get_text() for t in ax.texts]
+        assert len(notes) == sum(str(f["facet"]) == str(name) for f in p.computed["fits"])
+    assert_inside_canvas(p)
+
+
+@pytest.mark.parametrize("extra", [{"facet_cols": 1}, {"facet_cols": 12}, {"facet_labels": False},
+                                   {"legend_position": "inside_tr", "theme": "dark"}, {"width": 2.5, "height": 2.2},
+                                   {"legend_position": "left", "x_tick_angle": "90", "hlines": "50"}])
+def test_facet_layout_options(extra):
+    gid, data, options = facet_case("grouped_bar", **extra)
+    p = build(gid, data, options)
+    n = len(p.computed["facets"])
+    cols = len({round(ax.get_position().x0, 4) for ax in p.axes})
+    if "facet_cols" in extra:
+        assert cols == min(extra["facet_cols"], n)
+    if extra.get("facet_labels") is False:
+        assert not any(ax.get_title() for ax in p.axes)
+    assert_inside_canvas(p)
+
+
+def test_many_facets_and_long_names():
+    rng = np.random.default_rng(1)
+    names = ["A rather long panel name number %d" % i for i in range(7)]
+    data = {"columns": [{"name": "Site", "type": "nominal", "values": [n for n in names for _ in range(12)]},
+                        {"name": "Arm", "type": "nominal", "values": ["A", "B", "C"] * 28},
+                        {"name": "Y", "type": "continuous", "values": list(rng.normal(50, 9, 84).round(1))}]}
+    options = {"layout": "long", "dep": "Y", "group": "Arm", "facet": "Site", "stat_test": "welch",
+               "width": 6, "height": 5}
+    for gid in ("column_scatter", "box"):
+        p = build(gid, data, options)
+        assert len(p.axes) == 7
+        rows = len({round(ax.get_position().y0, 4) for ax in p.axes})
+        assert 2 <= rows <= 4                        # a sensible automatic grid
+        assert_inside_canvas(p)
+    one = {"columns": [dict(c, values=c["values"][:12]) for c in data["columns"]]}
+    assert len(build("column_bar", one, options).axes) == 1
+
+
+def test_without_facet_variable_nothing_changes():
+    gid, data, options = facet_case("column_bar")
+    plain = {k: v for k, v in options.items() if k != "facet"}
+    p = build(gid, data, {**plain, "facet_cols": 3, "facet_axes": "free", "facet_labels": True})
+    assert len(p.axes) == 1 and p.ax.get_ylabel() and not p.ax.get_title()
+    assert render(gid, data, plain) == render(gid, data, {**plain, "facet_axes": "free", "facet_cols": 2})
+
+
+# -------------------------------------------------------------- annotations
+ANNOTATIONS = [
+    {"kind": "text", "x": 0.25, "y": 0.2, "text": "Hello note", "bold": True, "italic": True, "angle": 30,
+     "align": "left", "size": 14, "color": "#AA3377"},
+    {"kind": "text", "x": 0.5, "y": 0.5, "text": "plain"},
+    {"kind": "arrow", "x": 0.2, "y": 0.3, "x2": 0.6, "y2": 0.7, "width": 2.5, "color": "#228833"},
+    {"kind": "line", "x": 0.1, "y": 0.9, "x2": 0.9, "y2": 0.9},
+    {"kind": "arrow", "x": 0.4, "y": 0.4, "x2": 0.4, "y2": 0.4},          # zero length must not crash
+]
+
+
+@pytest.mark.parametrize("gid", ["column_bar", "xy", "pie", "heatmap", "survival", "histogram", "forest", "roc"])
+def test_annotations_render_on_every_kind_of_graph(gid):
+    _, data, options = _case(BASE[gid])
+    options.update(width=4, height=3, annotations=ANNOTATIONS)
+    svg = render(gid, data, options, editable_text=True)
+    check_svg(svg, 4, 3)
+    assert b"Hello note" in svg and b"#aa3377" in svg.lower() and b"#228833" in svg.lower()
+
+
+def test_annotations_use_figure_fractions_from_the_top_left_and_do_not_move_the_layout():
+    _, data, options = _case(BASE["column_bar"])
+    options.update(width=4, height=3)
+    plain = build("column_bar", data, options)
+    noted = build("column_bar", data, {**options, "annotations": ANNOTATIONS})
+    assert np.allclose(plain.ax.get_position().bounds, noted.ax.get_position().bounds)
+    text = next(t for t in noted.fig.texts if t.get_text() == "Hello note")
+    assert np.allclose(text.get_position(), (0.25, 0.8))         # y is measured downwards
+    assert text.get_ha() == "left" and text.get_va() == "center" and text.get_rotation() == 30
+    assert text.get_fontsize() == 14 and text.get_fontweight() == "bold" and text.get_fontstyle() == "italic"
+    default = next(t for t in noted.fig.texts if t.get_text() == "plain")
+    assert default.get_fontsize() == noted.fonts["base"] and default.get_ha() == "center"
+    from matplotlib.patches import FancyArrowPatch
+    arrows = [a for a in noted.fig.artists if isinstance(a, FancyArrowPatch)]
+    assert len(arrows) == 1 and arrows[0].get_linewidth() == 2.5
+    top = max(a.get_zorder() for a in noted.fig.axes)
+    assert all(a.get_zorder() > top for a in arrows + [text])    # on top of everything

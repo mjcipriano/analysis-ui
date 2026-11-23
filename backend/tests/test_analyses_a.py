@@ -312,7 +312,7 @@ def test_normality_small_constant_and_negative_groups():
 OUT = [9.8, 10.1, 10.4, 9.9, None, 10.0, 10.2, 9.7, 25.0, 10.3, 9.6, 10.05]
 
 
-@pytest.mark.parametrize("method", ["grubbs", "grubbs_iter", "gesd", "tukey", "mad"])
+@pytest.mark.parametrize("method", ["rout", "grubbs", "grubbs_iter", "gesd", "tukey", "mad"])
 def test_outliers_planted_value_found_in_both_layouts(method):
     clean = [v for v in OUT if v is not None and v != 25.0]
     d = data(col("ok", [10.0, 10.5, 9.5, 10.2, 9.8, 10.1, 9.9, 10.3, 10.4, 9.7, 10.0, 9.6]), col("bad", OUT))
@@ -1050,7 +1050,8 @@ FORMS = pytest.mark.parametrize("d,o", [RAW, COUNTS], ids=["raw", "counts"])
 @FORMS
 def test_contingency_2x2(d, o):
     res = run_ok("contingency", d, {**o, "gtest": True, "diagnostic": True, "show_expected": True,
-                                    "show_col_pct": True, "show_total_pct": True})
+                                    "show_col_pct": True, "show_total_pct": True,
+                                    "rr_method": "katz", "or_method": "woolf"})
     obs = rows(res, "Observed counts")
     assert [obs[0]["c0"], obs[0]["c1"], obs[1]["c0"], obs[1]["c1"]] == [39, 21, 28, 32]
     assert obs[2]["total"] == 120 and obs[0]["total"] == 60 and obs[2]["c0"] == 67
@@ -1165,7 +1166,13 @@ def test_fisher_rxc_enumeration_and_monte_carlo_fallback():
 
 def test_contingency_zero_cell_and_missing():
     d = data(col("r", ["a", "b"], "nominal"), col("x", [0, 6]), col("y", [9, 4]))
-    res = run_ok("contingency", d, {"data_form": "counts", "labels": "r", "count_cols": ["x", "y"]})
+    o = {"data_form": "counts", "labels": "r", "count_cols": ["x", "y"]}
+    res = run_ok("contingency", d, o)                              # default (Koopman / Baptista–Pike): no correction
+    rr = row(res, "Effect sizes", measure="Relative risk")
+    assert rr["value"] == 0 and rr["lo"] == 0 and 0 < rr["hi"] < 1
+    orr = row(res, "Effect sizes", measure="Odds ratio")
+    assert orr["value"] == 0 and orr["lo"] == 0 and 0 < orr["hi"] < 1
+    res = run_ok("contingency", d, {**o, "or_method": "woolf", "rr_method": "katz"})
     orr = row(res, "Effect sizes", measure="Odds ratio")
     close(orr["value"], (0.5 * 4.5) / (9.5 * 6.5))
     assert any("0.5 was added" in f for f in table(res, "Effect sizes")["footnotes"])
@@ -1373,3 +1380,293 @@ def test_results_contain_no_nan_and_are_json_serialisable():
                 assert el["title"]
                 for r in el["rows"]:
                     assert set(r) <= keys, (aid, el["title"], set(r) - keys)
+
+
+# ==================================================== follow-up: Prism gaps
+
+def _rout_reference(x, q):
+    """Independent, deliberately naive re-implementation of ROUT for one sample."""
+    from scipy import optimize
+    x = np.asarray(x, float)
+    n = len(x)
+    p68 = lambda r: np.quantile(np.abs(r), 0.6827, method="weibull") * n / (n - 1)   # noqa: E731
+    c = np.median(x)
+    s = p68(x - c)
+    for _ in range(200):
+        fine = np.linspace(x.min(), x.max(), 20001)
+        merit = np.log1p(((x[None, :] - fine[:, None]) / s) ** 2).sum(axis=1)
+        g = fine[np.argmin(merit)]
+        step = fine[1] - fine[0]
+        c2 = optimize.minimize_scalar(lambda m: np.log1p(((x - m) / s) ** 2).sum(),
+                                      bounds=(g - step, g + step), method="bounded", options={"xatol": 1e-13}).x
+        s2 = p68(x - c2)
+        same = abs(c2 - c) < 1e-11 and abs(s2 - s) < 1e-11
+        c, s = c2, s2
+        if same:
+            break
+    resid = np.abs(x - c)
+    order = np.argsort(resid, kind="stable")
+    pv = 2 * stats.t.sf(resid[order] / s, n - 1)
+    out = []
+    for i in range(int(0.7 * n), n + 1):
+        if i >= 1 and pv[i - 1] < q * (n - (i - 1)) / n:
+            out = sorted(order[i - 1:].tolist())
+            break
+    return c, s, out
+
+
+def test_rout_is_the_default_and_matches_reference():
+    assert registry.ANALYSES["outliers"].options[4]["default"] == "rout"
+    rng = np.random.default_rng(42)
+    x = np.r_[rng.normal(50, 5, 24), [95.0, 12.0]]
+    c, s, out = _rout_reference(x, 0.01)
+    assert out == [24, 25]
+    res = run_ok("outliers", wide({"x": x}), {"columns": ["x"]})
+    summ = row(res, "Outlier summary", group="x")
+    assert summ["n_out"] == 2
+    assert f"{c:.4g}" in summ["note"] and f"{s:.4g}" in summ["note"]
+    found = {f["row"]: f for f in rows(res, "Outliers found")}
+    assert sorted(found) == [25, 26]
+    close(found[25]["stat"], abs(95.0 - c) / s, rel=1e-6)
+    close(found[25]["p"], 2 * stats.t.sf(abs(95.0 - c) / s, 25), rel=1e-5)
+    # FDR thresholds: the largest residual (rank N) must have P < Q/N, the second largest P < 2Q/N
+    close(found[25]["crit"], 0.01 * 1 / 26)
+    close(found[26]["crit"], 0.01 * 2 / 26)
+    note = " ".join(table(res, "Outlier summary")["footnotes"])
+    assert "Motulsky" in note and "68.27" in note and "Q = 1%" in note and "ln(1 +" in note
+    assert "ROUT (Q = 1%)" in summary(res)
+
+
+def test_rout_hand_checkable_case():
+    from analysis_ui.analyses.descriptive import rout_fit, rout_outliers
+    # symmetric data: the robust centre is the centre of symmetry (0); |residuals| = 1,1,2,2,3,3,4,4
+    x = np.array([-4.0, -3.0, -2.0, -1.0, 1.0, 2.0, 3.0, 4.0])
+    c, s = rout_fit(x)
+    assert abs(c) < 1e-8
+    # 68.27th percentile by the (n+1)p rule: position 9 × 0.6827 = 6.1443 → 3 + 0.1443 × (4 − 3); then × N/(N − 1)
+    close(s, (3 + (9 * 0.6827 - 6)) * 8 / 7, rel=1e-9)
+    # add a wild value: centre and RSDR barely move (robust), ordinary mean and SD do
+    y = np.r_[x, 40.0]
+    c2, s2 = rout_fit(y)
+    assert abs(c2) < 0.6 and s2 < 2 * s and y.std(ddof=1) > 3 * s2
+    found, _, _ = rout_outliers(y, 0.01)
+    assert [f["index"] for f in found] == [8]
+    close(found[0]["stat"], (40 - c2) / s2)
+    close(found[0]["p"], 2 * stats.t.sf((40 - c2) / s2, 8))
+    assert found[0]["p"] < found[0]["crit"] == pytest.approx(0.01 / 9)
+    # a stricter Q can make the same point acceptable; a looser Q never finds fewer
+    z = np.r_[x, 14.0]
+    n_found = [len(rout_outliers(z, q)[0]) for q in (0.0001, 0.01, 0.1, 0.5)]
+    assert n_found == sorted(n_found) and n_found[0] == 0 and n_found[-1] >= 1
+    res = run_ok("outliers", wide({"z": z}), {"columns": ["z"], "rout_q": 0.01})
+    assert row(res, "Outlier summary", group="z")["n_out"] == 0
+    assert "Q = 0.01%" in summary(res)
+
+
+def test_rout_false_discovery_properties():
+    """Motulsky & Brown: with Q = 1% and clean Gaussian data, only about 1–3% of
+    data sets get any (false) outlier; obvious outliers are found."""
+    from analysis_ui.analyses.descriptive import rout_outliers
+    rng = np.random.default_rng(2024)
+    for n in (10, 30, 100):
+        flagged = sum(bool(rout_outliers(rng.normal(size=n), 0.01)[0]) for _ in range(400))
+        assert flagged / 400 < 0.045, (n, flagged)
+    loose = sum(bool(rout_outliers(rng.normal(size=30), 0.10)[0]) for _ in range(400))
+    strict = sum(bool(rout_outliers(rng.normal(size=30), 0.001)[0]) for _ in range(400))
+    assert strict <= 4 and loose > strict
+    hits = 0
+    for _ in range(100):
+        x = np.r_[rng.normal(0, 1, 28), [9.0, -11.0]]             # two gross outliers (masking defeats Grubbs)
+        hits += {28, 29} <= {f["index"] for f in rout_outliers(x, 0.01)[0]}
+    assert hits == 100
+
+
+def test_rout_degenerate():
+    res = run_ok("outliers", wide({"same": [5.0] * 9 + [80.0], "tiny": [1.0, 2.0]}), {"columns": ["same", "tiny"]})
+    assert row(res, "Outlier summary", group="same")["n_out"] == 0
+    assert "RSDR is zero" in row(res, "Outlier summary", group="same")["note"]
+    res = run_ok("outliers", wide({"x": [1.0, 2.0, 3.0]}), {"columns": ["x"]})
+    assert row(res, "Outlier summary", group="x")["n_out"] == 0
+
+
+# ---- Koopman / Baptista–Pike
+
+def test_koopman_score_interval():
+    from statsmodels.stats.proportion import confint_proportions_2indep
+    from analysis_ui.analyses.categorical import koopman_ci
+    lo, hi = koopman_ci(36, 40, 16, 80)                 # Koopman (1984) example: ratio 4.5, 95% CI 2.94 to 7.15
+    close(lo, 2.940, abs_=5e-4)
+    close(hi, 7.152, abs_=5e-4)
+    for x1, n1, x2, n2 in ((36, 40, 16, 80), (7, 34, 1, 34), (39, 60, 28, 60), (1, 1000, 3, 900), (20, 20, 5, 20)):
+        for conf in (0.95, 0.90):
+            ref = confint_proportions_2indep(x1, n1, x2, n2, compare="ratio", method="score", correction=False,
+                                             alpha=1 - conf)
+            lo, hi = koopman_ci(x1, n1, x2, n2, conf)
+            close(lo, ref[0], rel=1e-7)
+            close(hi, ref[1], rel=1e-7)
+    # Koopman's closed-form statistic at the limits equals the chi-square critical value
+    x1, n1, x2, n2 = 7, 34, 1, 34
+    for phi in koopman_ci(x1, n1, x2, n2):
+        N = n1 + n2
+        b = phi * (n1 + x2) + x1 + n2
+        p1 = (b - math.sqrt(b * b - 4 * phi * N * (x1 + x2))) / (2 * N)
+        p2 = p1 / phi
+        u = (x1 - n1 * p1) ** 2 / (n1 * p1 * (1 - p1)) * (1 + n1 * (phi - p1) / (n2 * (1 - p1)))
+        close(u, stats.chi2.ppf(0.95, 1), rel=1e-7)
+        assert 0 < p2 < 1
+    # zero cells
+    lo, hi = koopman_ci(0, 20, 5, 20)
+    assert lo == 0 and 0 < hi < 1
+    lo, hi = koopman_ci(5, 20, 0, 20)
+    assert lo > 1 and hi == math.inf
+    lo, hi = koopman_ci(20, 20, 20, 20)
+    close(lo, 20 / (20 + stats.norm.ppf(0.975) ** 2), rel=1e-6)   # closed form when both proportions are 1
+    close(hi, (20 + stats.norm.ppf(0.975) ** 2) / 20, rel=1e-6)
+    assert all(math.isnan(v) for v in koopman_ci(0, 20, 0, 20))
+
+
+def _bp_brute(a, b, c, d, conf=0.95, midp=False, grid=None):
+    """Brute-force Baptista–Pike limits with scipy's Fisher noncentral hypergeometric distribution."""
+    N, r1, c1 = a + b + c + d, a + b, a + c
+    xs = np.arange(max(0, c1 - (c + d)), min(r1, c1) + 1)
+    grid = np.exp(np.linspace(math.log(1e-4), math.log(1e4), 9211)) if grid is None else grid
+    ok = []
+    for th in grid:
+        pm = stats.nchypergeom_fisher.pmf(xs, N, r1, c1, th)
+        obs = pm[a - xs[0]]
+        p = pm[pm <= obs * (1 + 1e-7)].sum() - (0.5 * obs if midp else 0.0)
+        ok.append(p > 1 - conf)
+    ok = np.array(ok)
+    return grid[ok].min(), grid[ok].max()
+
+
+@pytest.mark.parametrize("tb", [(7, 27, 1, 33), (12, 5, 6, 14), (3, 9, 8, 4), (15, 30, 9, 41), (2, 8, 1, 12)])
+@pytest.mark.parametrize("midp", [False, True])
+def test_baptista_pike_against_brute_force(tb, midp):
+    from analysis_ui.analyses.categorical import baptista_pike_ci
+    lo, hi = baptista_pike_ci(*tb, 0.95, midp=midp)
+    blo, bhi = _bp_brute(*tb, midp=midp)
+    step = math.exp(math.log(1e8) / 9210)                          # one grid step of the brute-force scan
+    assert blo / step <= lo <= blo * 1.000001, (lo, blo)
+    assert bhi / 1.000001 <= hi <= bhi * step, (hi, bhi)
+    a, b, c, d = tb
+    assert lo < a * d / (b * c) < hi
+    # the exact interval is never wider than the Cornfield-type exact interval of fisher.test and
+    # the mid-P interval is never wider than the exact one
+    if midp:
+        elo, ehi = baptista_pike_ci(*tb, 0.95, midp=False)
+        assert elo <= lo * 1.000001 and hi <= ehi * 1.000001
+
+
+def test_baptista_pike_inverts_fishers_test_and_handles_zero_cells():
+    from analysis_ui.analyses.categorical import baptista_pike_ci
+    # θ = 1 is inside the 95% interval exactly when Fisher's exact test has P > 0.05
+    for tb in ((39, 21, 28, 32), (7, 27, 1, 33), (12, 5, 6, 14), (10, 10, 9, 11), (3, 17, 11, 9)):
+        lo, hi = baptista_pike_ci(*tb)
+        p = stats.fisher_exact([tb[:2], tb[2:]])[1]
+        assert (lo <= 1 <= hi) == (p > 0.05), (tb, lo, hi, p)
+    lo, hi = baptista_pike_ci(0, 9, 6, 4)
+    assert lo == 0 and 0 < hi < 1
+    lo, hi = baptista_pike_ci(3, 0, 2, 5)
+    assert 0 < lo < 1.5 and hi == math.inf
+    # R: fisher.test(matrix(c(39,21,28,32), 2, byrow = TRUE))$conf.int = 0.9577 to 4.7266 (Clopper–Pearson type);
+    # Baptista–Pike is contained in it
+    lo, hi = baptista_pike_ci(39, 21, 28, 32)
+    assert 0.9577251 <= lo and hi <= 4.7266193 and lo <= 1.0 <= hi
+
+
+@FORMS
+def test_contingency_default_ci_methods_are_prisms(d, o):
+    from analysis_ui.analyses.categorical import baptista_pike_ci, koopman_ci
+    res = run_ok("contingency", d, o)
+    rr = row(res, "Effect sizes", measure="Relative risk")
+    assert rr["method"] == "Koopman asymptotic score"
+    close(rr["value"], (39 / 60) / (28 / 60))
+    lo, hi = koopman_ci(39, 60, 28, 60)
+    close(rr["lo"], lo)
+    close(rr["hi"], hi)
+    orr = row(res, "Effect sizes", measure="Odds ratio")
+    assert orr["method"].startswith("Baptista–Pike")
+    close(orr["value"], 39 * 32 / (21 * 28))
+    lo, hi = baptista_pike_ci(39, 21, 28, 32)
+    close(orr["lo"], lo)
+    close(orr["hi"], hi)
+    assert row(res, "Effect sizes", measure="Risk difference (attributable risk)")["method"] == "Newcombe hybrid score"
+    assert any("Baptista–Pike" in f for f in table(res, "Effect sizes")["footnotes"])
+    res = run_ok("contingency", d, {**o, "or_method": "baptista_pike_midp", "rd_method": "wald"})
+    assert row(res, "Effect sizes", measure="Odds ratio")["method"] == "Baptista–Pike mid-P"
+    rd = row(res, "Effect sizes", measure="Risk difference (attributable risk)")
+    se = math.sqrt(0.65 * 0.35 / 60 + (28 / 60) * (32 / 60) / 60)
+    close(rd["lo"], 39 / 60 - 28 / 60 - stats.norm.ppf(0.975) * se)
+    close(rd["hi"], 39 / 60 - 28 / 60 + stats.norm.ppf(0.975) * se)
+    assert rd["method"] == "Wald"
+
+
+# ---- exact Spearman
+
+def test_spearman_exact_p_value():
+    x = [1, 2, 3, 4, 5, 6, 7, 8]
+    y = [2, 1, 4, 3, 8, 5, 7, 6]
+    res = run_ok("correlation", data(col("x", x), col("y", y)), {"variables": ["x", "y"], "method": "spearman"})
+    r = rows(res, "Spearman")[0]
+    close(r["r"], stats.spearmanr(x, y).statistic)
+    close(r["p"], 0.0279265873016)                                 # R: cor.test(x, y, method = "spearman") (exact)
+    assert any("exact" in f and "This P value" in f for f in table(res, "Spearman")["footnotes"])
+    y9 = [3, 1, 2, 6, 4, 5, 8, 7, 9]
+    res = run_ok("correlation", data(col("x", range(1, 10)), col("y", y9)), {"variables": ["x", "y"],
+                                                                             "method": "spearman"})
+    close(rows(res, "Spearman")[0]["p"], 0.0030753968254)          # R: cor.test(1:9, y2, method = "spearman")
+    # scipy's own permutation test agrees (independent implementation)
+    x6, y6 = np.array([1.0, 2, 3, 4, 5, 6]), np.array([2.0, 1, 3, 6, 4, 5])
+    ref = stats.permutation_test((x6,), lambda a: stats.spearmanr(a, y6).statistic,
+                                 permutation_type="pairings", n_resamples=np.inf)
+    from analysis_ui.analyses.correlation import spearman_exact_p
+    assert spearman_exact_p(x6, y6) == pytest.approx(ref.pvalue, rel=1e-9)
+    # perfect and reversed orderings, n = 5: P = 2/5!
+    res = run_ok("correlation", data(col("x", [1, 2, 3, 4, 5]), col("y", [50, 40, 30, 20, 10])),
+                 {"variables": ["x", "y"], "method": "spearman"})
+    close(rows(res, "Spearman")[0]["p"], 2 / 120)
+    close(rows(res, "Spearman")[0]["r"], -1.0)
+
+
+def test_spearman_falls_back_to_t_approximation():
+    # ties → approximation
+    x = [1, 2, 2, 4, 5, 6, 7, 8]
+    y = [2, 1, 4, 3, 8, 5, 7, 6]
+    res = run_ok("correlation", data(col("x", x), col("y", y)), {"variables": ["x", "y"], "method": "spearman"})
+    close(rows(res, "Spearman")[0]["p"], stats.spearmanr(x, y).pvalue)
+    assert any("t approximation (tied" in f for f in table(res, "Spearman")["footnotes"])
+    # n = 10 → approximation
+    rng = np.random.default_rng(3)
+    x, y = rng.normal(size=10), rng.normal(size=10)
+    res = run_ok("correlation", data(col("x", x), col("y", y)), {"variables": ["x", "y"], "method": "spearman"})
+    close(rows(res, "Spearman")[0]["p"], stats.spearmanr(x, y).pvalue)
+    assert any("(n > 9)" in f for f in table(res, "Spearman")["footnotes"])
+    # matrix of small samples uses the exact P values too; Pearson is untouched
+    d = data(col("a", [1, 2, 3, 4, 5, 6, 7, 8]), col("b", [2, 1, 4, 3, 8, 5, 7, 6]), col("c", [8, 3, 5, 1, 2, 7, 4, 6]))
+    res = run_ok("correlation", d, {"variables": ["a", "b", "c"], "method": "spearman"})
+    close(rows(res, "P values")[0]["c1"], 0.0279265873016)
+    res = run_ok("correlation", d, {"variables": ["a", "b"]})
+    close(rows(res, "Pearson")[0]["p"], stats.pearsonr([1, 2, 3, 4, 5, 6, 7, 8], [2, 1, 4, 3, 8, 5, 7, 6]).pvalue)
+
+
+# ---- McNemar from typed counts
+
+def test_mcnemar_typed_counts_equal_raw():
+    raw = run_ok("mcnemar", _mc_data(4, 6, 1, 9), {"var1": "before", "var2": "after"})
+    typed = run_ok("mcnemar", None, {"data_form": "counts", "counts": "4, 6, 1, 9",
+                                     "names": "before, after, yes, no"})
+    for title in ("Paired table", "Discordant pairs", "McNemar's test", "Size of the change"):
+        assert rows(typed, title) == rows(raw, title), title
+    assert summary(typed) == summary(raw)
+    res = run_ok("mcnemar", None, {"data_form": "counts", "counts": "59 ; 6 ; 16 ; 80"})
+    close(row(res, "McNemar's test", test="Chi-square with continuity correction")["stat"], (abs(6 - 16) - 1) ** 2 / 22)
+    close(row(res, "McNemar's test", test="Exact (binomial)")["p"], stats.binomtest(6, 22, 0.5).pvalue)
+    assert rows(res, "Paired table")[0]["row"] == "+" and rows(res, "Paired table")[2]["total"] == 161
+    c = {"data_form": "counts"}
+    assert "four counts" in run_err("mcnemar", None, c)
+    assert "four counts" in run_err("mcnemar", None, {**c, "counts": "1, 2, 3"})
+    assert "whole numbers" in run_err("mcnemar", None, {**c, "counts": "1, 2.5, 3, 4"})
+    assert "zero" in run_err("mcnemar", None, {**c, "counts": "0, 0, 0, 0"})
+    assert "four names" in run_err("mcnemar", None, {**c, "counts": "1, 2, 3, 4", "names": "a, b"})
+    assert "x" in run_err("mcnemar", None, {**c, "counts": "1, x, 3, 4"})

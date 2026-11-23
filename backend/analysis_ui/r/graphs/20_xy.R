@@ -6,18 +6,33 @@ SHAPE_CYCLE <- c(16, 15, 17, 18, 1, 0, 2, 5)
 # shared tail of every graph with two numeric axes
 xy_assemble <- function(ctx, ax_x, ax_y, layers, legend, keys, key_labels = NULL, key_w = 1, extra_cols = NULL,
                         scales = list(), coord = NULL, theme_extra = NULL, dark = TRUE,
-                        x_breaks = NULL, y_breaks = NULL) {
+                        x_breaks = NULL, y_breaks = NULL, y_scale = NULL) {
+  parts <- list(y_scale = y_scale, ax_x = ax_x, ax_y = ax_y, layers = layers, legend = legend, keys = keys, key_labels = key_labels,
+                key_w = key_w, extra_cols = extra_cols, scales = scales, coord = coord, theme_extra = theme_extra,
+                dark = dark, x_breaks = x_breaks, y_breaks = y_breaks)
+  if (isTRUE(ctx$collect)) parts else xy_finish(ctx, parts)
+}
+
+xy_finish <- function(ctx, parts) {
+  ax_x <- parts$ax_x; ax_y <- parts$ax_y; keys <- parts$keys
+  Fc <- ctx$facet
+  free_x <- !is.null(Fc) && Fc$free_x; free_y <- !is.null(Fc) && Fc$free_y
   angle <- tick_angle(opt_chr(ctx$o, "x_tick_angle", "auto"))
-  P <- xy_panel(ctx, ax_y, legend, key_labels %||% keys, key_w)
+  P <- xy_panel(ctx, ax_y, parts$legend, parts$key_labels %||% keys, parts$key_w)
   if (is.null(ax_x$len_pt)) ax_x <- axis_on_page(ax_x, P$w, is.null(angle))
   if (is.null(ax_y$len_pt)) ax_y <- axis_on_page(ax_y, P$h, FALSE)
-  ggplot() + ref_lines(ctx, ax_x, ax_y) + layers +
-    axis_scale(ctx, ax_x, breaks = x_breaks, labels = if (!is.null(x_breaks)) fmt_num(x_breaks)) +
-    axis_scale(ctx, ax_y, breaks = y_breaks, labels = if (!is.null(y_breaks)) fmt_num(y_breaks)) +
-    colour_scales(ctx, keys, labels = key_labels, extra = c(if (dark) dark_extra(ctx, keys), extra_cols),
-                  legend = legend, key_w = key_w) + scales +
-    (coord %||% coord_cartesian(xlim = ax_x$lim, ylim = ax_y$lim, expand = FALSE)) +
-    gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = angle, key_w = key_w) + theme_extra
+  panel_axes <- function(which) lapply(parts$panels, function(p) p[[which]])
+  sx <- if (free_x) list(free_axis_scale(ctx, ax_x), facet_limits(panel_axes("ax_x"), "x", Fc$levels))
+        else axis_scale(ctx, ax_x, breaks = parts$x_breaks, labels = if (!is.null(parts$x_breaks)) fmt_num(parts$x_breaks))
+  sy <- if (!is.null(parts$y_scale)) list(parts$y_scale, if (free_y) facet_limits(panel_axes("ax_y"), "y", Fc$levels))
+        else if (free_y) list(free_axis_scale(ctx, ax_y), facet_limits(panel_axes("ax_y"), "y", Fc$levels))
+        else axis_scale(ctx, ax_y, breaks = parts$y_breaks, labels = if (!is.null(parts$y_breaks)) fmt_num(parts$y_breaks))
+  coord <- parts$coord %||% coord_cartesian(xlim = if (!free_x) ax_x$lim, ylim = if (!free_y) ax_y$lim, expand = FALSE)
+  ggplot() + ref_lines(ctx, ax_x, ax_y) + parts$layers + sx + sy +
+    colour_scales(ctx, keys, labels = parts$key_labels, extra = c(if (parts$dark) dark_extra(ctx, keys), parts$extra_cols),
+                  legend = parts$legend, key_w = parts$key_w) + parts$scales +
+    coord + (if (!is.null(Fc)) facet_layers(ctx)) +
+    gg_labs(ctx) + gg_theme(ctx, legend = parts$legend, x_angle = angle, key_w = parts$key_w) + parts$theme_extra
 }
 
 # panel size for two numeric axes
@@ -52,12 +67,18 @@ render_xy <- function(ctx) {
     yr <- range(yr, pmin(pmax(fy, yr[1] - slack), yr[2] + slack))
   }
   ax_x <- axis_spec(ctx, "x", finite_range(main$x, if (has_fit) fit$x), mult = if (bubbles) c(0.07, 0.07) else c(0.05, 0.05))
-  ax_y <- axis_spec(ctx, "y", yr, mult = if (bubbles) c(0.09, 0.09) else c(0.05, 0.05))
+  # in a panel grid the fit results are written inside each panel (the legend is shared)
+  fits <- records(comp$fits, c("group", "label"))
+  fits <- fits[!is.na(fits$label) & fits$group %in% keys, , drop = FALSE]
+  panel_fit_text <- !is.null(ctx$facet) && has_fit && opt_flag(o, "fit_legend", TRUE) && nrow(fits) > 0
+  fit_pt <- ctx$f$tick * 0.85
+  fit_room <- if (panel_fit_text) nrow(fits) * fit_pt * 1.25 / max(panel_size(ctx)$h, 30) else 0
+  ax_y <- axis_spec(ctx, "y", yr, mult = if (bubbles) c(0.09, 0.09) else c(0.05, 0.05 + min(fit_room, 0.4) * 1.1))
+  axes_ready(ctx, "any", x = ax_x, y = ax_y)
 
   # ---- legend
-  fits <- records(comp$fits, c("group", "label"))
   fit_labels <- NULL
-  if (has_fit && opt_flag(o, "fit_legend", TRUE) && nrow(fits)) {
+  if (has_fit && opt_flag(o, "fit_legend", TRUE) && nrow(fits) && !panel_fit_text) {
     lab <- stats::setNames(fits$label, fits$group)
     lab <- lab[!is.na(lab) & names(lab) %in% keys]
     if (length(lab)) fit_labels <- if (length(keys) == 1) lab else stats::setNames(paste0(names(lab), "\n", lab), names(lab))
@@ -95,6 +116,11 @@ render_xy <- function(ctx) {
     fit <- fit[on_scale(ax_x, fit$x) & on_scale(ax_y, fit$y), , drop = FALSE]
     fit$key <- as.character(fit$group)
     fit <- fit[order(fit$group, fit$x), , drop = FALSE]
+    if (!is.null(ctx$facet) && ctx$facet$free_y) {
+      # a free panel axis is trained on the data: keep the curve and its band inside the resolved limits
+      fit$y[fit$y < ax_y$lim[1] | fit$y > ax_y$lim[2]] <- NA
+      fit$lo <- pmin(pmax(fit$lo, ax_y$lim[1]), ax_y$lim[2]); fit$hi <- pmin(pmax(fit$hi, ax_y$lim[1]), ax_y$lim[2])
+    }
     band <- fit[is.finite(fit$lo) & is.finite(fit$hi), , drop = FALSE]
     if (opt_flag(o, "fit_band", TRUE) && nrow(band)) {
       if (ax_y$is_log) band$lo <- pmax(band$lo, ax_y$lim[1] * 1e-3)
@@ -118,7 +144,8 @@ render_xy <- function(ctx) {
     else add(line_geom(geom_line, ld, m, show.legend = TRUE))
   }
   if (has_fit && nrow(fit)) {
-    add(line_geom(geom_line, fit, aes(x = .data$x, y = .data$y, colour = .data$key, group = .data$key), show.legend = TRUE))
+    add(line_geom(geom_line, fit, aes(x = .data$x, y = .data$y, colour = .data$key, group = .data$key), show.legend = TRUE,
+                  na.rm = TRUE))
   }
   # ---- points
   shape_opt <- opt_chr(o, "point_shape", "circle")
@@ -166,6 +193,14 @@ render_xy <- function(ctx) {
       min.segment.length = 0.3, segment.size = lw(0.5), segment.colour = ctx$muted,
       box.padding = 0.25, point.padding = d_pt / 72.27 / 2, show.legend = FALSE))
   }
+  if (panel_fit_text) {
+    i <- seq_len(nrow(fits))
+    ft <- data.frame(x = ax_x$inv(ax_x$tlim[1] + diff(ax_x$tlim) * 6 / P$w),
+                     y = ax_y$inv(ax_y$tlim[2] - diff(ax_y$tlim) * (4 + (i - 1) * fit_pt * 1.25) / P$h),
+                     label = fits$label, key = fits$group)
+    add(geom_text(aes(x = .data$x, y = .data$y, label = .data$label, colour = paste0(.data$key, DARK_SUFFIX)), data = ft,
+                  hjust = 0, vjust = 1, size = ts(fit_pt), family = ctx$f$family, show.legend = FALSE))
+  }
   if (opt_flag(o, "marginal_rug")) {
     add(geom_rug(aes(x = .data$x, y = .data$y, colour = .data$key), data = main, sides = "bl", alpha = 0.55,
                  linewidth = lw(0.6), length = grid::unit(min(0.03, 6 / P$h), "npc"), show.legend = FALSE))
@@ -194,4 +229,4 @@ render_xy <- function(ctx) {
   if (!is.null(fit_labels)) p <- p + theme(legend.spacing.y = grid::unit(ctx$f$legend * 0.45, "pt"))
   p
 }
-register("xy", render_xy)
+register("xy", function(ctx) with_facets(ctx, render_xy, xy_finish))

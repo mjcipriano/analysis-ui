@@ -943,6 +943,7 @@ class Plot:
                     self._share_axes()
                     for fn in self.hooks[phase]:
                         fn()
+                    self._share_axes()               # the second run can still nudge a limit by a hair
                 self._layout()
         for fn in self.hooks[2]:
             fn()

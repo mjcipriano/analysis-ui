@@ -171,6 +171,7 @@ axis_trans <- function(scale) {
 #   fixed   exact limits that ignore the data (e.g. c(0, 100))
 # Returns list(which, scale, tr, inv, lim (data units), tlim (transformed), user = c(min, max set?)).
 axis_spec <- function(ctx, which, rng, zero = FALSE, flush = FALSE, mult = c(0.05, 0.05), fixed = NULL) {
+  if (!is.null(ctx$fixed_axes[[which]])) return(ctx$fixed_axes[[which]])   # axis shared between facet panels
   o <- ctx$o
   scale <- opt_chr(o, paste0(which, "_scale"), "linear")
   if (!scale %in% c("linear", "log10", "log2", "sqrt")) scale <- "linear"
@@ -409,8 +410,14 @@ gg_theme <- function(ctx, legend = "none", x_angle = NULL, key_w = 1, void = FAL
     legend.box.spacing = grid::unit(f$legend * 0.8, "pt"),
     strip.background = element_blank(),
     strip.text = element_text(colour = th$text, size = f$tick, face = "bold", hjust = 0,
-                              margin = margin(b = 3, t = 2))
+                              margin = margin(b = 3, t = 2)),
+    strip.clip = "off"
   )
+  if (!is.null(ctx$facet)) {
+    t <- t + theme(strip.text = if (ctx$facet$labels) element_text(colour = th$text, size = f$tick, face = "bold", hjust = 0.5,
+                                                                   margin = margin(b = 4, t = 2)) else element_blank(),
+                   panel.spacing = grid::unit(ctx$facet$spacing, "pt"))
+  }
   if (!is.null(x_angle)) {
     t <- t + theme(axis.text.x = element_text(angle = x_angle$angle, hjust = x_angle$hjust,
                                               vjust = x_angle$vjust, margin = margin(t = gap)))
@@ -523,7 +530,15 @@ panel_size <- function(ctx, left_w = NULL, bottom_h = NULL, right = 0, top = 0, 
       if (legend == "top") topm <- topm + h else bottom <- bottom + h
     }
   }
-  list(w = max(ctx$W * 72 - left - rightm, 20), h = max(ctx$H * 72 - topm - bottom, 20), left = left, right = rightm)
+  w <- ctx$W * 72 - left - rightm; h <- ctx$H * 72 - topm - bottom
+  Fc <- ctx$facet
+  if (!is.null(Fc)) {                                # the plotting area is shared by a grid of panels
+    axis_v <- (left_w %||% (f$tick * 2.2)) + gap + tick_len
+    axis_h <- (bottom_h %||% (f$tick * 1.1)) + gap + tick_len
+    w <- (w - (Fc$ncol - 1) * (Fc$spacing + if (Fc$free_v) axis_v else 0)) / Fc$ncol
+    h <- (h - Fc$nrow * Fc$strip - (Fc$nrow - 1) * (Fc$spacing + if (Fc$free_h) axis_h else 0)) / Fc$nrow
+  }
+  list(w = max(w, 20), h = max(h, 20), left = left, right = rightm)
 }
 
 # ---- markers -----------------------------------------------------------------
@@ -779,6 +794,7 @@ render <- function(req) {
   on.exit(if (dev %in% grDevices::dev.list()) grDevices::dev.off(dev), add = TRUE)
   plot <- fn(ctx)
   if (inherits(plot, "grob")) grid::grid.draw(plot) else print(plot)
+  draw_annotations(ctx)
   grDevices::dev.off(dev)
   if (identical(req$format %||% "svg", "svg") && !isTRUE(req$editable_text)) svg_point_units(req$file)
   list(ok = TRUE)
@@ -798,4 +814,256 @@ svg_point_units <- function(path) {
     writeChar(paste0(fixed, substr(txt, 601, nchar(txt, type = "bytes"))), con, eos = NULL, useBytes = TRUE)
   }
   invisible(TRUE)
+}
+
+
+# ---- free-form annotations ---------------------------------------------------
+# Drawn last, on top of the finished figure, in figure coordinates (fractions
+# from the top-left corner), so they never influence the layout.
+draw_annotations <- function(ctx) {
+  items <- ctx$o[["_annotations"]]
+  if (is.null(items) || !is.list(items) || !length(items)) return(invisible(NULL))
+  if (!is.null(names(items)) && !is.list(items[[1]])) items <- list(items)     # a single record
+  Wp <- ctx$W * 72; Hp <- ctx$H * 72                                           # figure size in points
+  pt <- function(v) grid::unit(v, "bigpts")
+  for (a in items) {
+    if (!is.list(a)) next
+    kind <- opt_chr(a, "kind", "")
+    x <- opt_num(a, "x", NA); y <- opt_num(a, "y", NA)
+    if (is.na(x) || is.na(y)) next
+    col <- opt_chr(a, "color", ctx$th$text)
+    col <- tryCatch({ grDevices::col2rgb(col); col }, error = function(e) ctx$th$text)
+    if (kind == "text") {
+      label <- opt_chr(a, "text", "")
+      if (!nzchar(label)) next
+      bold <- opt_flag(a, "bold"); italic <- opt_flag(a, "italic")
+      align <- opt_chr(a, "align", "center")
+      grid::grid.draw(grid::textGrob(
+        label, x = pt(x * Wp), y = pt((1 - y) * Hp), rot = opt_num(a, "angle", 0),
+        hjust = switch(align, left = 0, right = 1, 0.5), vjust = 0.5,
+        gp = grid::gpar(col = col, fontsize = opt_num(a, "size", ctx$f$base), fontfamily = ctx$f$family, lineheight = 0.95,
+                        fontface = if (bold && italic) "bold.italic" else if (bold) "bold" else if (italic) "italic" else "plain")))
+    } else if (kind %in% c("arrow", "line")) {
+      x2 <- opt_num(a, "x2", NA); y2 <- opt_num(a, "y2", NA)
+      if (is.na(x2) || is.na(y2)) next
+      width <- opt_num(a, "width", 1.2)
+      p0 <- c(x * Wp, (1 - y) * Hp); p1 <- c(x2 * Wp, (1 - y2) * Hp)
+      len <- sqrt(sum((p1 - p0)^2))
+      if (len < 0.01) next
+      u <- (p1 - p0) / len                              # unit vector towards the head
+      end <- p1
+      if (kind == "arrow") {
+        head <- min(max(5, width * 4.2), max(len * 0.9, 2))    # head length (pt), scales with the line width
+        half <- head * 0.42
+        base <- p1 - u * head
+        n <- c(-u[2], u[1])
+        tri <- rbind(p1, base + n * half, base - n * half)
+        end <- p1 - u * head * 0.85                     # the shaft stops inside the head: no blunt end at the tip
+        grid::grid.draw(grid::polygonGrob(x = pt(tri[, 1]), y = pt(tri[, 2]), gp = grid::gpar(fill = col, col = NA)))
+      }
+      grid::grid.draw(grid::segmentsGrob(pt(p0[1]), pt(p0[2]), pt(end[1]), pt(end[2]),
+                                         gp = grid::gpar(col = col, lwd = width * 96 / 72, lineend = "butt")))
+    }
+  }
+  invisible(NULL)
+}
+
+# ---- facets (multi-panel graphs) ---------------------------------------------
+# A faceted graph is the unfaceted renderer run once per panel on that panel's
+# subset: every panel computes its own swarm, brackets, error bars, curves ...
+# and its layers are tagged with the `facet` column. The panels are then put
+# into one ggplot with facet_wrap, so there is one legend and one set of titles.
+#
+# Protocol between with_facets() and a renderer:
+#   * ctx$facet       grid description (see facet_layout); panel_size() returns
+#                     the size of ONE panel when it is set;
+#   * ctx$fixed_axes  axes shared by all panels, returned as-is by axis_spec();
+#   * ctx$stop_at     "base" / "final": axes_ready() aborts the renderer at that
+#                     point and hands back the panel's axes (cheap first passes
+#                     used to work out shared limits);
+#   * ctx$collect     the *_assemble() functions return their arguments instead
+#                     of a plot; facet_plot() merges them.
+
+axes_ready <- function(ctx, stage, x = NULL, y = NULL) {
+  if (!is.null(ctx$stop_at) && (ctx$stop_at == stage || stage == "any")) {
+    stop(structure(class = c("aui_axes", "error", "condition"),
+                   list(message = "axes ready", call = NULL, x = x, y = y)))
+  }
+  invisible(NULL)
+}
+
+facet_layout <- function(ctx, levels, free_x_ok = TRUE) {
+  comp <- ctx$computed
+  n <- length(levels)
+  ncol <- opt_num(comp, "facet_cols", NA)
+  if (is.na(ncol) || ncol < 1) {                       # automatic: panels as square as possible
+    cand <- seq_len(n)
+    aspect <- (ctx$W / cand) / (ctx$H / ceiling(n / cand))
+    ncol <- cand[which.min(abs(log(aspect / 1.05)) + 0.02 * ceiling(n / cand))]
+  }
+  ncol <- max(1, min(n, round(ncol)))
+  nrow <- ceiling(n / ncol)
+  mode <- opt_chr(comp, "facet_axes", "shared")
+  free_y <- mode %in% c("free_y", "free")              # in terms of the x / y aesthetics
+  free_x <- mode == "free" && free_x_ok
+  free_h <- if (ctx$flip) free_y else free_x           # ... and as seen on the page
+  free_v <- if (ctx$flip) free_x else free_y
+  labels <- opt_flag(comp, "facet_labels", TRUE)
+  lines <- max(1, lengths(strsplit(levels, "\n", fixed = TRUE)))
+  list(levels = levels, n = n, ncol = ncol, nrow = nrow, free_x = free_x, free_y = free_y,
+       free_h = free_h, free_v = free_v, labels = labels,
+       scales = if (free_h && free_v) "free" else if (free_h) "free_x" else if (free_v) "free_y" else "fixed",
+       spacing = max(8, ctx$f$base * 0.9), strip = if (labels) ctx$f$tick * 1.2 * lines + 6 else 0)
+}
+
+# the context of one panel: frames, brackets and fits restricted to that facet
+facet_ctx <- function(ctx, level) {
+  ctx$frames <- lapply(ctx$frames, function(df) {
+    if (is.data.frame(df) && !is.null(df$facet)) df[!is.na(df$facet) & as.character(df$facet) == level, , drop = FALSE] else df
+  })
+  keep <- function(items) {
+    if (is.null(items) || !is.list(items) || !length(items)) return(list())
+    if (!is.null(names(items)) && !is.list(items[[1]])) items <- list(items)
+    Filter(function(r) identical(as.character(r[["facet"]] %||% ""), level), items)
+  }
+  ctx$computed$brackets <- keep(ctx$computed$brackets)
+  ctx$computed$fits <- keep(ctx$computed$fits)
+  ctx$facet_level <- level
+  ctx
+}
+
+flatten_layers <- function(x) {
+  if (inherits(x, "Layer")) return(list(x))
+  if (is.list(x)) return(unlist(lapply(x, flatten_layers), recursive = FALSE))
+  list()
+}
+# send layers to one panel
+tag_layers <- function(layers, level, levels) {
+  layers <- flatten_layers(layers)
+  for (l in layers) if (is.data.frame(l$data)) l$data$facet <- factor(rep(level, nrow(l$data)), levels = levels)
+  layers
+}
+
+# Panels produce the same kinds of layers; drawing 7 x 8 separate layers is slow,
+# so layers that only differ in their data are combined into one. Constant
+# aesthetics given per row (e.g. text colours) are concatenated with the data.
+merge_layers <- function(layers) {
+  if (length(layers) < 2) return(layers)
+  signature <- function(l) {
+    n <- if (is.data.frame(l$data)) nrow(l$data) else -1L
+    per_row <- vapply(l$aes_params, function(v) length(v) > 1 && length(v) == n, logical(1))
+    const <- l$aes_params[!per_row]
+    paste(class(l$geom)[1], class(l$stat)[1], class(l$position)[1],
+          paste(names(l$mapping), vapply(l$mapping, function(m) paste(deparse(m), collapse = ""), ""), collapse = ";"),
+          paste(names(const), vapply(const, function(v) paste(format(v), collapse = ","), ""), collapse = ";"),
+          paste(sort(names(l$aes_params)[per_row]), collapse = ","),
+          paste(deparse(l$geom_params[setdiff(names(l$geom_params), "na.rm")]), collapse = ""),
+          paste(deparse(l$stat_params), collapse = ""), paste(deparse(l$show.legend), collapse = ""),
+          if (is.data.frame(l$data)) paste(names(l$data), collapse = ",") else "nodata", sep = "|")
+  }
+  sig <- vapply(layers, signature, character(1))
+  keep <- list()
+  for (s in unique(sig)) {
+    group <- layers[sig == s]
+    first <- group[[1]]
+    if (length(group) > 1 && is.data.frame(first$data)) {
+      n <- nrow(first$data)
+      for (nm in names(first$aes_params)) {
+        if (length(first$aes_params[[nm]]) > 1 && length(first$aes_params[[nm]]) == n) {
+          first$aes_params[[nm]] <- unlist(lapply(group, function(l) l$aes_params[[nm]]))
+        }
+      }
+      first$data <- do.call(rbind, lapply(group, function(l) l$data))
+    }
+    keep <- c(keep, list(first))
+  }
+  keep
+}
+
+union_axes <- function(axes) {
+  axes <- Filter(Negate(is.null), axes)
+  if (!length(axes)) return(NULL)
+  ax <- axes[[1]]
+  ax$tlim <- c(min(vapply(axes, function(a) a$tlim[1], numeric(1))), max(vapply(axes, function(a) a$tlim[2], numeric(1))))
+  ax$lim <- ax$inv(ax$tlim)
+  ax
+}
+
+# Position scale for an axis that differs between panels. The limits of each
+# panel come from invisible points at its resolved limits (facet_limits);
+# breaks and labels are worked out per panel from those limits.
+free_axis_scale <- function(ctx, ax, ...) {
+  cache <- new.env()
+  key <- function(b) paste(signif(b, 12), collapse = "|")
+  minor_ok <- !grid_on(ctx, ax$which)
+  brk <- function(lim) {
+    a <- ax
+    a$lim <- lim; a$tlim <- suppressWarnings(a$tr(lim))
+    if (!all(is.finite(a$tlim))) return(numeric(0))
+    b <- axis_breaks(ctx, a, minor_ok = minor_ok)
+    assign(key(b$breaks), b$labels, envir = cache)
+    b$breaks
+  }
+  lab <- function(b) {
+    l <- if (length(b)) cache[[key(b)]] else NULL
+    if (is.null(l) || length(l) != length(b)) fmt_num(b) else l
+  }
+  umin <- opt_num(ctx$o, paste0(ax$which, "_min")); umax <- opt_num(ctx$o, paste0(ax$which, "_max"))
+  args <- list(trans = ax$trans, breaks = brk, labels = lab, expand = c(0, 0), ...)
+  if (any(ax$user)) {                                  # user limits win over the trained range; nothing is dropped
+    args$limits <- function(l) c(if (ax$user[1]) ax$lim[1] else l[1], if (ax$user[2]) ax$lim[2] else l[2])
+    args$oob <- scales::oob_keep
+  }
+  do.call(if (ax$which == "x") scale_x_continuous else scale_y_continuous, args)
+}
+facet_limits <- function(axes, which, levels) {
+  d <- do.call(rbind, lapply(seq_along(axes), function(i) {
+    data.frame(v = axes[[i]]$lim, facet = factor(levels[i], levels = levels))
+  }))
+  geom_blank(if (which == "x") aes(x = .data$v) else aes(y = .data$v), data = d, inherit.aes = FALSE)
+}
+
+# facet_wrap + the pieces every faceted graph needs
+facet_layers <- function(ctx) {
+  Fc <- ctx$facet
+  out <- list(facet_wrap(~facet, ncol = Fc$ncol, scales = Fc$scales, drop = FALSE))
+  if (ctx$th$frame == "L" && ctx$th$axis_width > 0) {
+    # ggplot draws shared axes on the outer panels only: give every panel its left and bottom line
+    out <- c(out, list(annotation_custom(grid::polylineGrob(
+      x = c(0, 0, 1), y = c(1, 0, 0), gp = grid::gpar(col = ctx$th$axis, lwd = ctx$th$axis_width * 96 / 72 * 2,
+                                                      lineend = "square", linejoin = "mitre")))))
+  }
+  out
+}
+
+# Run `builder` (an ordinary renderer) per panel and combine the panels.
+#   finish(ctx, parts)  builds the plot from merged parts (parts$panels = per-panel parts)
+with_facets <- function(ctx, builder, finish, free_x_ok = TRUE) {
+  levels <- chr_vec(ctx$computed$facets)
+  has_col <- any(vapply(ctx$frames, function(df) is.data.frame(df) && !is.null(df$facet), logical(1)))
+  if (!length(levels) || !has_col) return(builder(ctx))
+  ctx$facet <- facet_layout(ctx, levels, free_x_ok)
+  Fc <- ctx$facet
+  panels <- lapply(levels, function(l) facet_ctx(ctx, l))
+  axes_pass <- function(stage, fixed) lapply(panels, function(cp) {
+    cp$stop_at <- stage; cp$fixed_axes <- fixed
+    tryCatch(builder(cp), aui_axes = function(e) e)
+  })
+  got <- function(res, which) lapply(res, function(r) if (inherits(r, "aui_axes")) r[[which]] else NULL)
+  fixed <- list()
+  if (!Fc$free_x || !Fc$free_y) {
+    for (stage in c("base", "final")) {                # "final" lets brackets raise the shared top
+      res <- axes_pass(stage, fixed)
+      if (!Fc$free_x) fixed$x <- union_axes(got(res, "x")) %||% fixed$x
+      if (!Fc$free_y) fixed$y <- union_axes(got(res, "y")) %||% fixed$y
+    }
+  }
+  parts <- lapply(panels, function(cp) { cp$collect <- TRUE; cp$fixed_axes <- fixed; builder(cp) })
+  merged <- parts[[1]]
+  merged$layers <- merge_layers(unlist(lapply(seq_along(parts), function(i) {
+    tag_layers(parts[[i]]$layers, levels[i], levels)
+  }), recursive = FALSE))
+  merged$panels <- parts
+  ctx$fixed_axes <- fixed
+  finish(ctx, merged)
 }
