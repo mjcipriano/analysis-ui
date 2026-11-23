@@ -194,7 +194,9 @@ _info: dict | None = None
 def pool() -> RPool:
     global _pool
     if _pool is None:
+        import atexit
         _pool = RPool()
+        atexit.register(_pool.shutdown)
     return _pool
 
 

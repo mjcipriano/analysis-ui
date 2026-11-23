@@ -9,6 +9,11 @@ import pandas as pd
 from .errors import AnalysisError
 
 
+# More levels than this in a grouping variable is almost always a wrong column
+# (an ID or a measurement), and would make tables and graphs explode.
+MAX_LEVELS = 300
+
+
 class Context:
     def __init__(self, df: pd.DataFrame, options: dict):
         self.df = df
@@ -65,7 +70,12 @@ class Context:
                       for v in vals]
             levels = sorted({l for l in labels if l is not None}, key=float)
             s = pd.Series(pd.Categorical(labels, categories=levels), index=s.index, name=name)
-        return s.cat.remove_unused_categories()
+        s = s.cat.remove_unused_categories()
+        if len(s.cat.categories) > MAX_LEVELS:
+            raise AnalysisError(
+                f"“{name}” has {len(s.cat.categories):,} different values, which is too many to use "
+                f"as a grouping variable (the limit is {MAX_LEVELS}). Did you mean to pick a different column?")
+        return s
 
     _labels: dict[str, str] = {}
 

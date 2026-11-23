@@ -160,6 +160,8 @@ export function autofill(schema: OptionDef[], sheet: Sheet, opts: { twoGroups?: 
   // an ID-like categorical column (all values unique) is not a grouping variable
   const isId = (c: Column) => { const l = levelsOf(c).length; return l > 1 && l === c.values.filter((v) => !isBlank(v)).length }
   const grouping = cats.filter((c) => !isId(c))
+  // a numeric column can stand in for a grouping variable only when it has a handful of distinct values (0/1, dose levels …)
+  const fewValues = (c: Column) => new Set(c.values.filter((v) => !isBlank(v))).size <= 12
   const byName = new Map(schema.map((o) => [o.name, o]))
   const used = new Set<string>()
 
@@ -181,8 +183,8 @@ export function autofill(schema: OptionDef[], sheet: Sheet, opts: { twoGroups?: 
       if (!o.required && !['group', 'subject', 'label'].includes(o.name)) continue
       let pool: Column[]
       if (o.name === 'subject' || o.name === 'label') pool = cats.filter(isId)
-      else if (allowsCat && allowsNum) pool = [...grouping, ...(o.required ? numeric : [])]
-      else if (allowsCat) pool = [...grouping, ...cats.filter(isId)]
+      else if (allowsCat && allowsNum) pool = [...grouping, ...(o.required ? numeric.filter(fewValues) : [])]
+      else if (allowsCat) pool = grouping
       else pool = numeric
       pool = pool.filter((c) => !used.has(c.name))
       let pick = hint ? pool.find((c) => hint.test(c.name)) : undefined

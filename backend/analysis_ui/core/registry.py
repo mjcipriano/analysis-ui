@@ -192,7 +192,12 @@ def run_analysis(analysis_id: str, data: dict | None, options: dict | None) -> d
             assert d.func is not None
             from .plotstyle import MPL_LOCK
             with MPL_LOCK:
-                res = normalize(d.func(ctx))
+                try:
+                    res = normalize(d.func(ctx))
+                finally:
+                    # figures an analysis created but never attached must not pile up
+                    import matplotlib.pyplot as plt
+                    plt.close("all")
         else:
             from .rbridge import pool
             if d.prepare:
