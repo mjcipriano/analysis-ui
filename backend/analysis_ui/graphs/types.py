@@ -156,7 +156,7 @@ def faceted(prep):
         for lev in levels:
             mask = (f.astype(object) == lev).to_numpy()
             sub_opts = ctx.options
-            if "density" in full.frames:      # same smoothing grid in every panel
+            if "density" in full.frames and ctx.opt("facet_axes", "shared") != "free":      # same grid when X is shared
                 gx = full.frames["density"]["x"]
                 sub_opts = dict(ctx.options, _grid=(float(gx.min()), float(gx.max())))
             sub = Context(ctx.df[mask].reset_index(drop=True), sub_opts)

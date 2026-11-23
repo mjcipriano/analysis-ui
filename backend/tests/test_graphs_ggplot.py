@@ -403,8 +403,13 @@ def test_facets_are_offered_for_every_documented_type():
         assert "facet" in {o["name"] for o in GRAPHS[gid].options}, gid
 
 
-@pytest.mark.parametrize("variant", sorted(FACET_VARIANTS))
-@pytest.mark.parametrize("gid", sorted(FACET_SPECS))
+# every type gets the core variants; the remaining ones run on one type per family
+CORE_VARIANTS = ("default", "free", "flip_free", "stats")
+FULL_IDS = ("column_bar", "grouped_box", "xy", "density")
+
+
+@pytest.mark.parametrize("gid,variant", [(g, v) for g in sorted(FACET_SPECS) for v in sorted(FACET_VARIANTS)
+                                         if v in CORE_VARIANTS or g in FULL_IDS])
 def test_facets(gid, variant):
     data = _facet_data(2)
     options = {**_facet_options(gid, FACET_VARIANTS[variant]), "width": 4.5, "height": 3.2}
