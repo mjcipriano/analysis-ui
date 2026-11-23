@@ -324,6 +324,14 @@ def prepare_factorial(ctx: Context):
         check_factor(df, f"f{i + 1}", c)
     for i, c in enumerate(covs):
         check_numeric(df, f"x{i + 1}", c)
+    cells = 1
+    for i in range(len(factors)):
+        cells *= df[f"f{i + 1}"].nunique()
+    if cells > len(df):
+        raise AnalysisError(
+            f"The chosen factors define {cells:,} combinations of levels but there are only {len(df):,} rows, "
+            "so the model cannot be fitted. Factors should be grouping variables with a few levels each; "
+            "put numeric measurements under Covariates instead.")
     return df, with_private(ctx.options, names, dropped,
                             factors=[f"f{i + 1}" for i in range(len(factors))],
                             covariates=[f"x{i + 1}" for i in range(len(covs))])

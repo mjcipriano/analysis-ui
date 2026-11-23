@@ -194,7 +194,8 @@ export function autofill(schema: OptionDef[], sheet: Sheet, opts: { twoGroups?: 
       if (pick) { values[o.name] = pick.name; used.add(pick.name) }
     } else if (o.type === 'variables') {
       if ((o.min ?? 0) < 1) continue
-      const pool = (allowsNum ? numeric : grouping).filter((c) => !used.has(c.name))
+      // roles that accept categories get grouping columns (plus numeric columns with only a few values)
+      const pool = (allowsCat ? [...grouping, ...(allowsNum ? numeric.filter(fewValues) : [])] : numeric).filter((c) => !used.has(c.name))
       let take = pool
       if (o.max) take = pool.slice(0, o.max)
       else if (o.name === 'columns' && opts.twoGroups) take = pool.slice(0, 2)
