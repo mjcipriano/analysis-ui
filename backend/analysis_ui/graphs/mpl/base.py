@@ -286,6 +286,11 @@ class Plot:
     def color(self, key) -> str:
         return self.colors.get(str(key)) or FALLBACK_COLOR
 
+    def accent(self, color, amount: float = 0.45) -> str:
+        """A shade of ``color`` that stands out from it *and* from the panel:
+        darker on light themes, lighter on dark ones."""
+        return lighten(color, amount) if luminance(self.panel) < 0.4 else darken(color, amount)
+
     def opt(self, name, default=None):
         v = self.o.get(name)
         return default if v is None else v
@@ -452,7 +457,7 @@ class Plot:
         self.rotate_xticks(ax, 45 if line_h * 1.3 <= slot else 90)
         if line_h > slot:                            # even vertical labels collide: shrink, then thin out
             new = max(slot / self.px / 1.2, 4.5)
-            keep = max(int(math.ceil(new * self.px * 1.2 / slot)), 1)
+            keep = max(int(math.ceil(new * self.px * 1.2 / slot - 0.05)), 1)
             for i, t in enumerate(ax.get_xticklabels()):
                 t.set_fontsize(new)
                 t.set_visible(i % keep == 0)

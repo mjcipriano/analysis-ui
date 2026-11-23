@@ -82,14 +82,25 @@ def _outside_labels(p: Plot, labels: list, fs: float):
             if not idx:
                 continue
             hs = [p.text_size(labels[i][1], fs)[1] / unit * 1.02 for i in idx]
-            ys = [R * math.sin(labels[i][0]) for i in idx]
-            for k in range(1, len(idx)):             # top-down: keep a line height between neighbours
-                ys[k] = min(ys[k], ys[k - 1] - (hs[k] + hs[k - 1]) / 2)
-            low = -R - 0.25
-            if ys[-1] < low:                         # ran out at the bottom: shift the column up again
-                ys[-1] = low
-                for k in range(len(idx) - 2, -1, -1):
-                    ys[k] = max(ys[k], ys[k + 1] + (hs[k] + hs[k + 1]) / 2)
+            want = [R * math.sin(labels[i][0]) for i in idx]
+            # resolve overlaps by merging neighbours into blocks centred on their wanted positions
+            blocks = [[[k], want[k], hs[k]] for k in range(len(idx))]          # members, centre, height
+            merged = True
+            while merged:
+                merged = False
+                for b in range(len(blocks) - 1):
+                    up, dn = blocks[b], blocks[b + 1]
+                    if up[1] - up[2] / 2 < dn[1] + dn[2] / 2 - 1e-9:
+                        members = up[0] + dn[0]
+                        blocks[b:b + 2] = [[members, sum(want[k] for k in members) / len(members), up[2] + dn[2]]]
+                        merged = True
+                        break
+            ys = [0.0] * len(idx)
+            for members, centre, height in blocks:
+                top = centre + height / 2
+                for k in members:
+                    ys[k] = top - hs[k] / 2
+                    top -= hs[k]
             for i, y in zip(idx, ys):
                 mid = labels[i][0]
                 x = side * max(math.sqrt(max(R * R - y * y, 0.0)), 0.35 if abs(y) > R else 0.0)

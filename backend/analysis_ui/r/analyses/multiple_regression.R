@@ -36,14 +36,14 @@ run <- function(data, options) {
   p_model <- if (is.null(fs)) NA else stats::pf(fs[1], fs[2], fs[3], lower.tail = FALSE)
 
   aui_table("Model summary", data.frame(
-    Measure = c("Observations", "R²", "Adjusted R²", "Residual SD (Sy.x)", "RMSE", "F", "df (model, residual)", "P value (overall model)", "AIC", "BIC"),
+    Measure = c("Observations", "R\u00b2", "Adjusted R\u00b2", "Residual SD (Sy.x)", "RMSE", "F", "df (model, residual)", "P value (overall model)", "AIC", "BIC"),
     value = c(as.character(n), st_fmt(s$r.squared), st_fmt(s$adj.r.squared), st_fmt(s$sigma), st_fmt(sqrt(mean(res^2))),
               if (is.null(fs)) "" else st_fmt(fs[1]), if (is.null(fs)) "" else sprintf("%d, %d", as.integer(fs[2]), as.integer(fs[3])),
               aui_fmt_p(p_model), st_fmt(stats::AIC(fit), 5), st_fmt(stats::BIC(fit), 5)),
     stringsAsFactors = FALSE),
     labels = c(value = "Value"),
     footnotes = c(paste0("Ordinary least squares", if (weighted) paste0(" weighted by ", st_name(names, "w")) else "", ". Model: ", st_formula_text(form, names), "."),
-                  if (!intercept) "The model has no intercept: R² is computed about zero rather than about the mean and is not comparable with R² of models that have an intercept.",
+                  if (!intercept) "The model has no intercept: R\u00b2 is computed about zero rather than about the mean and is not comparable with R\u00b2 of models that have an intercept.",
                   st_dropped_note(options)))
 
   # ---- ANOVA table
@@ -64,7 +64,7 @@ run <- function(data, options) {
         MS = a$`Sum Sq` / a$Df, F = a$`F value`, p = a$`Pr(>F)`, stars = ifelse(is_res, "", aui_stars(a$`Pr(>F)`)),
         eta_p = ifelse(is_res, NA, a$`Sum Sq` / (a$`Sum Sq` + ssr)), stringsAsFactors = FALSE),
         formats = c(df = "int", p = "p", stars = "stars"),
-        labels = c(p = "P value", stars = "Summary", eta_p = "Partial η²"),
+        labels = c(p = "P value", stars = "Summary", eta_p = "Partial \u03b7\u00b2"),
         footnotes = paste0("Type ", if (type == 3) "III sums of squares (each term adjusted for all others; sum-to-zero contrasts)."
                            else "II sums of squares (each term adjusted for all others except interactions that contain it)."))
     }
@@ -79,16 +79,16 @@ run <- function(data, options) {
   if (aui_flag(options, "standardized", TRUE) && !weighted) {
     sdx <- apply(mm, 2, stats::sd)
     tab$beta <- ifelse(colnames(mm) == "(Intercept)", NA, co[, 1] * sdx / stats::sd(data$y))
-    notes <- c(notes, "Standardized beta = coefficient × SD(predictor) / SD(outcome): the change in the outcome, in SDs, per one-SD change in the predictor.")
+    notes <- c(notes, "Standardized beta = coefficient \u00d7 SD(predictor) / SD(outcome): the change in the outcome, in SDs, per one-SD change in the predictor.")
   }
   if (aui_flag(options, "vif", TRUE) && intercept && ncol(mm) > 2) {
     tab$vif <- st_vif(mm)
-    notes <- c(notes, "VIF (variance inflation factor) above about 5–10 signals strong collinearity among predictors. Interaction and polynomial terms inflate VIFs by construction.")
+    notes <- c(notes, "VIF (variance inflation factor) above about 5\u201310 signals strong collinearity among predictors. Interaction and polynomial terms inflate VIFs by construction.")
     if (any(tab$vif > 10, na.rm = TRUE) && identical(aui_opt(options, "interactions", "none"), "none")) aui_warn("Some predictors are strongly collinear (VIF > 10): their coefficients are estimated imprecisely and can change a lot when other predictors are added or removed.")
   }
   aui_table("Coefficients", tab, formats = c(p = "p"),
             labels = c(est = "Estimate (B)", se = "SE", p = "P value", lower = paste(st_pct(alpha), "CI lower"),
-                       upper = paste(st_pct(alpha), "CI upper"), beta = "Standardized β", vif = "VIF"),
+                       upper = paste(st_pct(alpha), "CI upper"), beta = "Standardized \u03b2", vif = "VIF"),
             footnotes = notes)
 
   # ---- assumption checks
@@ -101,8 +101,8 @@ run <- function(data, options) {
     bp <- tryCatch(car::ncvTest(fit), error = function(e) NULL)
     if (!is.null(bp)) {
       aui_table("Constant variance (homoscedasticity)", data.frame(
-        Test = "Breusch–Pagan (score test)", chi2 = bp$ChiSquare, df = bp$Df, p = bp$p, stringsAsFactors = FALSE),
-        formats = c(df = "int", p = "p"), labels = c(chi2 = "χ²", p = "P value"),
+        Test = "Breusch\u2013Pagan (score test)", chi2 = bp$ChiSquare, df = bp$Df, p = bp$p, stringsAsFactors = FALSE),
+        formats = c(df = "int", p = "p"), labels = c(chi2 = "\u03c7\u00b2", p = "P value"),
         footnotes = "Tests whether the residual variance changes with the fitted values (car::ncvTest). A small P value is evidence of heteroscedasticity.")
     }
   }
@@ -111,7 +111,7 @@ run <- function(data, options) {
     d <- d[is.finite(d$rstd), , drop = FALSE]
     p1 <- st_resid_plot(d$fitted, d$res)
     p2 <- st_qq_plot(d$rstd, "Normal QQ plot") + ggplot2::labs(y = "Standardized residuals")
-    p3 <- st_resid_plot(d$fitted, sqrt(abs(d$rstd)), "Scale–location", expression(sqrt("|standardized residual|")))
+    p3 <- st_resid_plot(d$fitted, sqrt(abs(d$rstd)), "Scale\u2013location", expression(sqrt("|standardized residual|")))
     p3$layers[[1]] <- NULL
     p4 <- ggplot2::ggplot(d, ggplot2::aes(idx, cook)) +
       ggplot2::geom_segment(ggplot2::aes(xend = idx, yend = 0), colour = AUI_COLORS[1]) +
@@ -121,7 +121,7 @@ run <- function(data, options) {
       aui_plot("Diagnostic plots", patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2), width = 8.6, height = 7)
     } else {
       aui_plot("Residuals vs fitted values", p1); aui_plot("Normal QQ plot", p2)
-      aui_plot("Scale–location", p3); aui_plot("Cook's distance", p4)
+      aui_plot("Scale\u2013location", p3); aui_plot("Cook's distance", p4)
     }
   }
   if (aui_flag(options, "influence")) {
@@ -151,7 +151,7 @@ run <- function(data, options) {
   }
 
   sig <- which(tab$p < alpha & tab$Term != "Intercept")
-  txt <- sprintf("The model explains %s%% of the variation in %s (R² = %s, adjusted R² = %s)%s.",
+  txt <- sprintf("The model explains %s%% of the variation in %s (R\u00b2 = %s, adjusted R\u00b2 = %s)%s.",
                  formatC(100 * s$r.squared, format = "f", digits = 1), ylab, formatC(s$r.squared, format = "f", digits = 3),
                  formatC(s$adj.r.squared, format = "f", digits = 3),
                  if (is.null(fs)) "" else sprintf("; overall %s, %s", st_fmt_f(fs[1], fs[2], fs[3]), st_p_text(p_model)))

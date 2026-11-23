@@ -740,5 +740,22 @@ render <- function(req) {
   plot <- fn(ctx)
   if (inherits(plot, "grob")) grid::grid.draw(plot) else print(plot)
   grDevices::dev.off(dev)
+  if (identical(req$format %||% "svg", "svg") && !isTRUE(req$editable_text)) svg_point_units(req$file)
   list(ok = TRUE)
+}
+
+# Cairo writes the SVG size as bare numbers (= CSS pixels in a browser) although
+# its user unit is the point; declare the unit so the figure has its true size.
+svg_point_units <- function(path) {
+  size <- file.info(path)$size
+  if (is.na(size) || size <= 0) return(invisible(FALSE))
+  txt <- readChar(path, size, useBytes = TRUE)
+  head <- substr(txt, 1, 600)
+  fixed <- sub('(<svg[^>]*?[[:space:]]width=")([0-9.]+)("[[:space:]]+height=")([0-9.]+)(")', "\\1\\2pt\\3\\4pt\\5", head, perl = TRUE)
+  if (!identical(fixed, head)) {
+    con <- file(path, open = "wb")
+    on.exit(close(con))
+    writeChar(paste0(fixed, substr(txt, 601, nchar(txt, type = "bytes"))), con, eos = NULL, useBytes = TRUE)
+  }
+  invisible(TRUE)
 }

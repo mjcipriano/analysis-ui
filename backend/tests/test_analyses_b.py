@@ -570,8 +570,9 @@ def test_km_user_errors():
     assert "not a number" in fail("kaplan_meier", data, {**KM, "event_value": "dead"})
     assert "not a number" in fail("kaplan_meier", data, {**KM, "times": "12; x"})
     t = [5.0, 8, 12, 3, 9, 14]
-    assert "No events" in fail("kaplan_meier", wire(t=t, e=["no"] * 6, g=list("aabbab")),
-                               {"time": "t", "event": "e", "event_value": "yes", "group": "g"}) or True
+    censored = {"columns": [{"name": "t", "type": "continuous", "values": t},
+                            {"name": "e", "type": "nominal", "values": ["alive"] * 6, "levels": ["alive", "dead"]}]}
+    assert "No events" in fail("kaplan_meier", censored, {"time": "t", "event": "e", "event_value": "dead"})
     msg = fail("kaplan_meier", wire(t=t, e=["alive", "lost"] * 3), {"time": "t", "event": "e"})
     assert "Event value" in msg
     assert "negative" in fail("kaplan_meier", wire(t=[-1.0, 2, 3], e=[1.0, 1, 0]), {"time": "t", "event": "e"})
@@ -859,7 +860,6 @@ def test_kappa_edge_cases():
 # ======================================================================= PCA
 def test_pca_matches_sklearn():
     from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
     d = frame("biomarker_panel.csv")
     x = d[PANEL].to_numpy()
     z = (x - x.mean(0)) / x.std(0, ddof=1)
@@ -881,7 +881,6 @@ def test_pca_matches_sklearn():
     # a loading is the correlation between variable and component score
     assert load[2, 0] == approx(np.corrcoef(z[:, 2], scores[:, 0])[0, 1], 1e-9)
     assert plots(res) == ["Scree plot", "Score plot", "Loading plot"]
-    assert StandardScaler  # imported to document the scaling difference (ddof=0 vs 1) only
     assert "PC1 explains 45.0%" in summary(res)
 
 
@@ -916,7 +915,9 @@ def test_pca_missing_rows_and_errors():
     cols["CRP"][0] = None
     res = run("pca", wire(**cols), {"variables": PANEL[:3]})
     assert any("2 row(s)" in w for w in texts(res, "warning"))
-    assert "88 rows" in table(res, "Eigenvalues") and True or True
+    assert len(table(res, "Eigenvalues")) == 3
+    notes = next(e for e in res["elements"] if e["type"] == "table" and e["title"] == "Eigenvalues")["footnotes"]
+    assert notes[0].startswith("88 rows, 3 variables")
     assert "at least 2" in fail("pca", sample("biomarker_panel.csv"), {"variables": ["IL-6"]})
     assert "at least 2" in fail("pca", sample("biomarker_panel.csv"), {"variables": ["IL-6", "IL-6"]}).lower()
     msg = fail("pca", wire(a=[1.0, 2, 3, 4], b=[5.0, 5, 5, 5]), {"variables": ["a", "b"]})

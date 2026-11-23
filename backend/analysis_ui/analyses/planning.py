@@ -382,7 +382,7 @@ def power_proportions(ctx: Context) -> Results:
         return prop_power_pooled(p1, p2, n1, alpha, ratio, two_sided)
 
     r = Results()
-    info = _kv_table(r, "Sample size and power: two proportions", [
+    _kv_table(r, "Sample size and power: two proportions", [
         ("Proportion in group 1", p1, ""), ("Proportion in group 2", p2, ""),
         ("Difference (p₁ − p₂)", p1 - p2, ""), ("Effect size h", abs(h), "arcsine difference"),
         ("Significance level (α)", alpha, "two-tailed" if two_sided else "one-tailed"),
@@ -423,7 +423,6 @@ def power_proportions(ctx: Context) -> Results:
     t.note("Pooled variance: n₁ = [z₍α₎·√(p̄q̄(1 + 1/κ)) + z₍β₎·√(p₁q₁ + p₂q₂/κ)]² / (p₁ − p₂)², κ = n₂/n₁ "
            "(as R's power.prop.test for equal groups). Continuity correction after Fleiss, which approximates the "
            "sample size for Fisher's exact test. Arcsine: Cohen's h with the normal distribution (as R's pwr.2p.test).")
-    del info
     r.summary(concl)
     if ctx.opt("show_plot", True):
         ns = _n_grid(n1, 2)

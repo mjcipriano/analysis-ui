@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from ..core import (AnalysisError, COLORS, Context, Results, analysis, fmt_p,
+from ..core import (AnalysisError, COLORS, Context, Results, analysis,
                     new_figure, opt, stars)
 from .curve_fitting import p_phrase
 from ..graphs.types import _binary_outcome

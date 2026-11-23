@@ -21,10 +21,10 @@ run <- function(data, options) {
   aui_table("Friedman test", data.frame(
     chi2 = chi2, df = df, p = p, stars = aui_stars(p), n = n, W = w, stringsAsFactors = FALSE),
     formats = c(df = "int", n = "int", p = "p", stars = "stars"),
-    labels = c(chi2 = "Friedman statistic (χ²)", p = "P value", stars = "Summary",
+    labels = c(chi2 = "Friedman statistic (\u03c7\u00b2)", p = "P value", stars = "Summary",
                n = "Subjects", W = "Kendall's W"),
     footnotes = c("Approximate P value from the chi-square distribution; the statistic is corrected for ties within subjects.",
-                  "Kendall's W (coefficient of concordance) = χ² / (n (k − 1)); 0 = no agreement among subjects on the ordering of conditions, 1 = perfect agreement.",
+                  "Kendall's W (coefficient of concordance) = \u03c7\u00b2 / (n (k \u2212 1)); 0 = no agreement among subjects on the ordering of conditions, 1 = perfect agreement.",
                   st_dropped_note(options, "subject"),
                   if (n < 6) "With few subjects the chi-square approximation may be inaccurate."))
 
@@ -53,11 +53,11 @@ run <- function(data, options) {
     p_adj <- st_padjust(p_raw, method)
     aui_table(if (compare == "control") paste0("Dunn's multiple comparisons: each condition vs ", lev[ctrl])
               else "Dunn's multiple comparisons: all pairs",
-              data.frame(Comparison = paste0(lev[i], " − ", lev[j]), diff = unname(rsum[i] - rsum[j]),
+              data.frame(Comparison = paste0(lev[i], " \u2212 ", lev[j]), diff = unname(rsum[i] - rsum[j]),
                          z = unname(z), p_raw = p_raw, p = p_adj, stars = aui_stars(p_adj), stringsAsFactors = FALSE),
               formats = c(p_raw = "p", p = "p", stars = "stars"),
               labels = c(diff = "Rank sum diff.", p_raw = "P (unadjusted)", p = "Adjusted P", stars = "Summary"),
-              footnotes = paste0("Dunn's test on the within-subject rank sums: z = difference / √(n k (k + 1) / 6), ",
+              footnotes = paste0("Dunn's test on the within-subject rank sums: z = difference / \u221a(n k (k + 1) / 6), ",
                                  if (method == "none") "no correction for multiple comparisons." else paste0(st_adjust_label(method), " correction.")))
     n_sig <- sum(p_adj < alpha); n_cmp <- length(p_adj)
   }
@@ -75,10 +75,10 @@ run <- function(data, options) {
     aui_plot("Each subject's values (medians in colour)", pl, width = max(4.2, min(9, 1.6 + 0.9 * k)), height = 3.9)
   }
 
-  txt <- sprintf("Friedman test: the %d matched conditions %s (χ² = %s, df = %d, %s; Kendall's W = %s, n = %d subjects).",
+  txt <- sprintf("Friedman test: the %d matched conditions %s (\u03c7\u00b2 = %s, df = %d, %s; Kendall's W = %s, n = %d subjects).",
                  k, if (p < alpha) "differ significantly" else "do not differ significantly",
                  formatC(chi2, format = "f", digits = 2), df, st_p_text(p), formatC(w, format = "f", digits = 3), n)
-  if (!is.na(n_sig)) txt <- paste0(txt, sprintf(" Dunn's test: %d of %d comparison%s significant at α = %s.",
+  if (!is.na(n_sig)) txt <- paste0(txt, sprintf(" Dunn's test: %d of %d comparison%s significant at \u03b1 = %s.",
                                                 n_sig, n_cmp, if (n_cmp == 1) " is" else "s are", format(alpha)))
   aui_summary(txt)
   aui_graph("Create a before\u2013after graph of these data", "before_after", st_layout_options(options))

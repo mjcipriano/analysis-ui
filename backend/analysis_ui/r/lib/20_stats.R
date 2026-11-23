@@ -19,9 +19,9 @@ st_name <- function(names, key) {
   if (is.null(v)) key else as.character(v)
 }
 
-# Replace safe names inside model terms with display names; ":" becomes " × ".
+# Replace safe names inside model terms with display names; ":" becomes " \u00d7 ".
 st_pretty <- function(x, names) {
-  x <- gsub(":", " × ", as.character(x), fixed = TRUE)
+  x <- gsub(":", " \u00d7 ", as.character(x), fixed = TRUE)
   if (length(names) && length(x)) {
     keys <- names(names)[order(-nchar(names(names)))]
     m <- gregexpr(paste0("\\b(", paste(keys, collapse = "|"), ")\\b"), x, perl = TRUE)
@@ -85,9 +85,9 @@ st_with_treatment_contrasts <- function(expr) {
 ST_ADJUST_LABELS <- c(
   none = "no correction for multiple comparisons",
   lsd = "Fisher's LSD (no correction for multiple comparisons)",
-  bonferroni = "Bonferroni", sidak = "Šidák", holm = "Holm",
-  holm_sidak = "Holm–Šidák", fdr = "Benjamini–Hochberg FDR",
-  tukey = "Tukey", dunnett = "Dunnett", games_howell = "Games–Howell")
+  bonferroni = "Bonferroni", sidak = "\u0160id\u00e1k", holm = "Holm",
+  holm_sidak = "Holm\u2013\u0160id\u00e1k", fdr = "Benjamini\u2013Hochberg FDR",
+  tukey = "Tukey", dunnett = "Dunnett", games_howell = "Games\u2013Howell")
 
 st_adjust_label <- function(method) {
   if (method %in% names(ST_ADJUST_LABELS)) ST_ADJUST_LABELS[[method]] else method
@@ -128,8 +128,8 @@ st_ci_note <- function(method, alpha) {
   switch(method,
     holm = paste0("Confidence intervals are simultaneous Bonferroni intervals (", lvl,
                   " family-wise); the step-down Holm procedure itself does not define intervals."),
-    holm_sidak = paste0("Confidence intervals are simultaneous Šidák intervals (", lvl,
-                        " family-wise); the step-down Holm–Šidák procedure itself does not define intervals."),
+    holm_sidak = paste0("Confidence intervals are simultaneous \u0160id\u00e1k intervals (", lvl,
+                        " family-wise); the step-down Holm\u2013\u0160id\u00e1k procedure itself does not define intervals."),
     fdr = paste0("Confidence intervals are ordinary ", lvl, " intervals, not adjusted for multiple comparisons."),
     none = , lsd = paste0("Confidence intervals are ordinary ", lvl, " intervals, not adjusted for multiple comparisons."),
     paste0("Confidence intervals are simultaneous (", lvl, " family-wise)."))
@@ -151,8 +151,8 @@ st_control_index <- function(levels, control) {
   i <- match(control, levels)
   if (is.na(i)) i <- match(tolower(trimws(control)), tolower(trimws(levels)))
   if (is.na(i)) {
-    aui_warn(paste0("The control group “", control, "” was not found; using “",
-                    levels[1], "” instead."))
+    aui_warn(paste0("The control group \u201c", control, "\u201d was not found; using \u201c",
+                    levels[1], "\u201d instead."))
     return(1L)
   }
   i
@@ -247,8 +247,8 @@ st_group_comparisons <- function(value, group, type = "pairs", control = 1L,
     p <- stats::ptukey(abs(t) * sqrt(2), k, df, lower.tail = FALSE)
     crit <- stats::qtukey(1 - alpha, k, df) / sqrt(2)
     label <- if (method == "tukey") {
-      if (length(unique(n)) > 1) "Tukey–Kramer test (pooled SD, unequal sample sizes)" else "Tukey's test (pooled SD)"
-    } else "Games–Howell test (does not assume equal SDs; Welch df)"
+      if (length(unique(n)) > 1) "Tukey\u2013Kramer test (pooled SD, unequal sample sizes)" else "Tukey's test (pooled SD)"
+    } else "Games\u2013Howell test (does not assume equal SDs; Welch df)"
   } else if (method == "dunnett") {
     if (pooled) {
       corr <- st_dunnett_corr(n[i], n[j][1])
@@ -271,7 +271,7 @@ st_group_comparisons <- function(value, group, type = "pairs", control = 1L,
   }
   p <- pmin(1, pmax(0, p))
   out <- data.frame(
-    Comparison = paste0(lev[i], " − ", lev[j]),
+    Comparison = paste0(lev[i], " \u2212 ", lev[j]),
     diff = diff, se = se, lower = diff - crit * se, upper = diff + crit * se,
     t = t, df = df, p = p, stars = aui_stars(p), stringsAsFactors = FALSE)
   attr(out, "label") <- label
@@ -308,7 +308,7 @@ st_dunn <- function(value, group, type = "pairs", control = 1L, method = "bonfer
   z <- (rbar[i] - rbar[j]) / se
   p_raw <- 2 * stats::pnorm(-abs(z))
   p <- st_padjust(p_raw, method)
-  out <- data.frame(Comparison = paste0(lev[i], " − ", lev[j]),
+  out <- data.frame(Comparison = paste0(lev[i], " \u2212 ", lev[j]),
                     diff = rbar[i] - rbar[j], z = z, p_raw = p_raw, p = p,
                     stars = aui_stars(p), stringsAsFactors = FALSE)
   attr(out, "label") <- paste0("Dunn's test on mean ranks (with tie correction), ",
@@ -362,19 +362,19 @@ st_normality_table <- function(x, alpha = 0.05) {
   constant <- n < 3 || stats::sd(x) < 1e-12 * max(1, abs(mean(x)))
   if (!constant && n <= 5000) {
     sw <- stats::shapiro.test(x)
-    add("Shapiro–Wilk", "W", unname(sw$statistic), sw$p.value)
+    add("Shapiro\u2013Wilk", "W", unname(sw$statistic), sw$p.value)
   }
   if (!constant && n >= 8) {
     dp <- st_dagostino(x)
-    add("D'Agostino–Pearson omnibus", "K²", dp$statistic, dp$p)
+    add("D'Agostino\u2013Pearson omnibus", "K\u00b2", dp$statistic, dp$p)
     if (requireNamespace("nortest", quietly = TRUE)) {
       ad <- nortest::ad.test(x)
-      add("Anderson–Darling", "A²", unname(ad$statistic), ad$p.value)
+      add("Anderson\u2013Darling", "A\u00b2", unname(ad$statistic), ad$p.value)
     }
   }
   if (!constant && n >= 5 && requireNamespace("nortest", quietly = TRUE)) {
     ks <- nortest::lillie.test(x)
-    add("Kolmogorov–Smirnov (Lilliefors)", "D", unname(ks$statistic), ks$p.value)
+    add("Kolmogorov\u2013Smirnov (Lilliefors)", "D", unname(ks$statistic), ks$p.value)
   }
   if (!length(rows)) return(NULL)
   do.call(rbind, rows)
@@ -388,9 +388,9 @@ st_emit_normality <- function(x, alpha = 0.05, title = "Normality of residuals")
   }
   aui_table(title, tab, formats = c(p = "p"),
             labels = c(stat_name = "Statistic", statistic = "Value", p = "P value",
-                       Passed = paste0("Consistent with normality (α = ", alpha, ")?")),
+                       Passed = paste0("Consistent with normality (\u03b1 = ", alpha, ")?")),
             footnotes = c("A small P value is evidence that the residuals are not sampled from a normal distribution.",
-                          if (length(x) < 8) "The D'Agostino–Pearson and Anderson–Darling tests need at least 8 values."))
+                          if (length(x) < 8) "The D'Agostino\u2013Pearson and Anderson\u2013Darling tests need at least 8 values."))
   invisible(tab)
 }
 
@@ -578,9 +578,9 @@ st_emit_emm_comparisons <- function(fit, factor, by = NULL, names, type = "pairs
   s <- as.data.frame(st_quiet(summary(con, infer = c(TRUE, TRUE), adjust = adj, level = 1 - alpha))$value)
   pairs <- st_pairs(k, type, ctrl)
   n_by <- if (is.null(by)) 1L else nrow(unique(s[, by, drop = FALSE]))
-  labels <- paste0(lev[pairs[, 1]], " − ", lev[pairs[, 2]])
+  labels <- paste0(lev[pairs[, 1]], " \u2212 ", lev[pairs[, 2]])
   comparison <- if (nrow(s) == length(labels) * n_by) rep(labels, times = n_by)
-                else gsub(" - ", " − ", as.character(s$contrast), fixed = TRUE)
+                else gsub(" - ", " \u2212 ", as.character(s$contrast), fixed = TRUE)
   stat <- intersect(c("t.ratio", "z.ratio"), names(s))[1]
   lo <- intersect(c("lower.CL", "asymp.LCL"), names(s))[1]
   hi <- intersect(c("upper.CL", "asymp.UCL"), names(s))[1]
@@ -631,7 +631,7 @@ st_coef_labels <- function(fit_terms, mm, data, names) {
       } else st_pretty(v, names)
     })
     grid <- do.call(expand.grid, c(pieces, stringsAsFactors = FALSE))
-    lab <- apply(grid, 1, paste, collapse = " × ")
+    lab <- apply(grid, 1, paste, collapse = " \u00d7 ")
     if (length(lab) == length(idx)) out[idx] <- lab
   }
   out
@@ -649,7 +649,7 @@ st_reference_note <- function(data, factors, names) {
 #   interactions: "none"/"main", "twoway", "full", "custom"
 st_rhs <- function(terms, interactions = "none", custom = NULL) {
   if (identical(interactions, "custom")) {
-    if (is.null(custom) || !nzchar(trimws(custom))) aui_stop("Type the model terms in the “Custom model” box, or choose another interaction setting.")
+    if (is.null(custom) || !nzchar(trimws(custom))) aui_stop("Type the model terms in the \u201cCustom model\u201d box, or choose another interaction setting.")
     return(custom)
   }
   if (!length(terms)) return("1")
@@ -730,7 +730,7 @@ st_paired_comparisons <- function(wide, type = "pairs", control = 1L, method = "
     p <- st_padjust(p_raw, method)
     crit <- stats::qt(1 - st_ci_alpha(alpha, m, method) / 2, df)
   }
-  out <- data.frame(Comparison = paste0(lev[i], " − ", lev[j]), diff = unname(diff), se = se,
+  out <- data.frame(Comparison = paste0(lev[i], " \u2212 ", lev[j]), diff = unname(diff), se = se,
                     lower = unname(diff) - crit * se, upper = unname(diff) + crit * se, t = unname(t),
                     df = df, p = pmin(1, p), stars = aui_stars(p), stringsAsFactors = FALSE)
   name <- switch(method, tukey = "Tukey's test", dunnett = "Dunnett's test",
@@ -738,7 +738,7 @@ st_paired_comparisons <- function(wide, type = "pairs", control = 1L, method = "
                  paste0("Paired t tests with ", st_adjust_label(method), " correction"))
   attr(out, "label") <- paste0(name, if (pooled)
     sprintf("; pooled error term of the ANOVA (assumes sphericity), df = %s.", format(df))
-    else sprintf("; each comparison uses the SD of its own paired differences (no sphericity assumption), df = n − 1 = %d.", n - 1))
+    else sprintf("; each comparison uses the SD of its own paired differences (no sphericity assumption), df = n \u2212 1 = %d.", n - 1))
   attr(out, "notes") <- c(notes, st_ci_note(if (method %in% c("holm", "none")) method else "tukey", alpha))
   out
 }

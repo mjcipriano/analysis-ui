@@ -42,6 +42,10 @@ _RC = {
 # The house style is the process-wide default; the graph engine overrides
 # everything it needs inside its own rc_context. All matplotlib work must hold
 # MPL_LOCK because pyplot and rcParams are global state.
+from matplotlib import font_manager as _fm  # noqa: E402
+
+_have = {f.name for f in _fm.fontManager.ttflist}
+_RC["font.family"] = [f for f in _RC["font.family"] if f in _have] or ["DejaVu Sans"]   # avoids findfont warnings
 matplotlib.rcParams.update(_RC)
 MPL_LOCK = threading.RLock()
 

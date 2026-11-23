@@ -23,7 +23,7 @@ run <- function(data, options) {
     ct <- st_quiet(as.data.frame(summary(emmeans::contrast(st_emmeans(fit, "group"), "pairwise"),
                                          infer = c(TRUE, TRUE), level = 1 - alpha)))$value
     aui_table(title, data.frame(
-      Comparison = paste0(lev[1], " − ", lev[2]), diff = ct$estimate, se = ct$SE, lower = ct$lower.CL, upper = ct$upper.CL,
+      Comparison = paste0(lev[1], " \u2212 ", lev[2]), diff = ct$estimate, se = ct$SE, lower = ct$lower.CL, upper = ct$upper.CL,
       t = ct$t.ratio, df = ct$df, p = ct$p.value, stars = aui_stars(ct$p.value), stringsAsFactors = FALSE),
       formats = c(p = "p", stars = "stars"),
       labels = c(diff = "Difference between means", se = "SE", lower = paste(st_pct(alpha), "CI lower"),
@@ -49,7 +49,7 @@ run <- function(data, options) {
     Variance = c(v_sub, v_res), SD = sqrt(c(v_sub, v_res)), share = c(v_sub, v_res) / (v_sub + v_res),
     stringsAsFactors = FALSE),
     formats = c(share = "pct"), labels = c(share = "% of random variation"),
-    footnotes = c(sprintf("Do the subgroups differ? Likelihood-ratio test of the subgroup variance: χ² = %s, %s (P halved because a variance cannot be negative).",
+    footnotes = c(sprintf("Do the subgroups differ? Likelihood-ratio test of the subgroup variance: \u03c7\u00b2 = %s, %s (P halved because a variance cannot be negative).",
                           formatC(lrt[1], format = "f", digits = 3), st_p_text(lrt[2])),
                   if (singular) "The variation between subgroups was estimated as zero: subgroups within a group do not differ more than expected from the scatter of individual values. The test then treats all values as independent."))
 

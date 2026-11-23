@@ -46,7 +46,7 @@ run <- function(data, options) {
     value = c(n, nev, n - nev, conc[1], conc[2], s$logtest[1], s$waldtest[1], s$sctest[1]),
     df = c(NA, NA, NA, NA, NA, s$logtest[2], s$waldtest[2], s$sctest[2]),
     p = c(NA, NA, NA, NA, NA, s$logtest[3], s$waldtest[3], s$sctest[3]), stringsAsFactors = FALSE),
-    formats = c(df = "int", p = "p"), labels = c(value = "Value / χ²", p = "P value"),
+    formats = c(df = "int", p = "p"), labels = c(value = "Value / \u03c7\u00b2", p = "P value"),
     footnotes = c(paste0("Cox proportional hazards regression; ", if (ties == "efron") "Efron" else "Breslow", " method for tied event times",
                          if (has_strata) paste0("; stratified by ", st_name(names, "strata"), " (separate baseline hazard in each stratum)") else "",
                          ". Model: ", tname, " ~ ", st_pretty(rhs, names), "."),
@@ -80,8 +80,8 @@ run <- function(data, options) {
                   ". A single hazard ratio is then an average over follow-up; consider stratifying by that variable or modelling a time-varying effect.")
       aui_table("Test of the proportional-hazards assumption", data.frame(
         Term = ifelse(rn == "GLOBAL", "Global", st_pretty(rn, names)), chi2 = tb$chisq, df = tb$df, p = tb_p, stringsAsFactors = FALSE),
-        formats = c(p = "p"), labels = c(chi2 = "χ²", p = "P value"),
-        footnotes = c("Grambsch–Therneau test based on scaled Schoenfeld residuals (survival::cox.zph, Kaplan–Meier time transform). A small P value is evidence that the effect of that term changes over time.",
+        formats = c(p = "p"), labels = c(chi2 = "\u03c7\u00b2", p = "P value"),
+        footnotes = c("Grambsch\u2013Therneau test based on scaled Schoenfeld residuals (survival::cox.zph, Kaplan\u2013Meier time transform). A small P value is evidence that the effect of that term changes over time.",
                       reading))
       ph_txt <- paste0(" ", sub("\\..*$", ".", reading))
     }
@@ -130,7 +130,7 @@ run <- function(data, options) {
   }
 
   sig <- hr[!is.na(hr$p) & hr$p < alpha, , drop = FALSE]
-  txt <- sprintf("Cox regression with %d subjects and %d events: the predictors are %s related to the hazard overall (likelihood-ratio χ² = %s, df = %d, %s; concordance = %s).",
+  txt <- sprintf("Cox regression with %d subjects and %d events: the predictors are %s related to the hazard overall (likelihood-ratio \u03c7\u00b2 = %s, df = %d, %s; concordance = %s).",
                  as.integer(n), as.integer(nev), if (s$logtest[3] < alpha) "significantly" else "not significantly",
                  formatC(s$logtest[1], format = "f", digits = 2), as.integer(s$logtest[2]), st_p_text(s$logtest[3]),
                  formatC(conc[1], format = "f", digits = 3))
@@ -139,7 +139,7 @@ run <- function(data, options) {
                      else " No individual predictor is statistically significant.", ph_txt)
   aui_summary(txt)
   if (length(factors)) {
-    aui_graph("Create a Kaplan–Meier graph of these data", "survival",
+    aui_graph("Create a Kaplan\u2013Meier graph of these data", "survival",
               list(time = tname, event = st_name(names, "status"), event_value = aui_opt(options, "event_value", "1"),
                    group = st_name(names, factors[1])))
   }

@@ -15,12 +15,12 @@ run <- function(data, options) {
   eps2 <- h / ((N^2 - 1) / (N + 1))
   eta2h <- max(0, (h - k + 1) / (N - k))
   has_ties <- any(duplicated(value))
-  aui_table("Kruskal–Wallis test", data.frame(
+  aui_table("Kruskal\u2013Wallis test", data.frame(
     H = h, df = df, p = p, stars = aui_stars(p), eps2 = eps2, eta2 = eta2h, stringsAsFactors = FALSE),
     formats = c(df = "int", p = "p", stars = "stars"),
-    labels = c(H = "Kruskal–Wallis H", p = "P value", stars = "Summary", eps2 = "Epsilon²", eta2 = "Eta² (H)"),
+    labels = c(H = "Kruskal\u2013Wallis H", p = "P value", stars = "Summary", eps2 = "Epsilon\u00b2", eta2 = "Eta\u00b2 (H)"),
     footnotes = c(paste0("Approximate P value from the chi-square distribution", if (has_ties) "; H is corrected for ties" else "", "."),
-                  "Epsilon² = H / (N − 1) and eta²(H) = (H − k + 1) / (N − k) are rank-based effect sizes (0 = no effect, 1 = complete separation).",
+                  "Epsilon\u00b2 = H / (N \u2212 1) and eta\u00b2(H) = (H \u2212 k + 1) / (N \u2212 k) are rank-based effect sizes (0 = no effect, 1 = complete separation).",
                   if (min(table(group)) < 5) "Some groups have fewer than five values; the chi-square approximation may be inaccurate."))
 
   r <- rank(value)
@@ -60,10 +60,10 @@ run <- function(data, options) {
     aui_plot("Box plot (median and quartiles)", pl, width = max(4.2, min(9, 1.6 + 0.9 * k)), height = 3.9)
   }
 
-  txt <- sprintf("Kruskal–Wallis test: the distributions of the %d groups %s (H = %s, df = %d, %s).",
+  txt <- sprintf("Kruskal\u2013Wallis test: the distributions of the %d groups %s (H = %s, df = %d, %s).",
                  k, if (p < alpha) "differ significantly" else "do not differ significantly",
                  formatC(h, format = "f", digits = 2), df, st_p_text(p))
-  if (!is.na(n_sig)) txt <- paste0(txt, sprintf(" Dunn's test: %d of %d comparison%s significant at α = %s.",
+  if (!is.na(n_sig)) txt <- paste0(txt, sprintf(" Dunn's test: %d of %d comparison%s significant at \u03b1 = %s.",
                                                 n_sig, n_cmp, if (n_cmp == 1) " is" else "s are", format(alpha)))
   aui_summary(txt)
   aui_graph("Create a column graph of these data", "column_scatter", st_layout_options(options))

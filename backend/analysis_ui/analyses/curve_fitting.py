@@ -12,7 +12,7 @@ from scipy import optimize, stats
 from ..core import (AnalysisError, COLORS, Context, Results, analysis, fmt_p,
                     new_figure, opt, stars)
 from ..core import curvefit
-from ..core.curvefit import MODELS, Fit, compare_fits, fit_model
+from ..core.curvefit import MODELS, Fit, fit_model
 
 CATEGORY = "Curve fitting"
 

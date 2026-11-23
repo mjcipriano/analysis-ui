@@ -59,14 +59,14 @@ run <- function(data, options) {
   ng <- vapply(random, function(g) nlevels(droplevels(data[[g]])), numeric(1))
   aui_table("Model fit", data.frame(
     Measure = c("Observations", paste0("Levels of ", vapply(random, function(g) st_name(names, g), "")),
-                "R² marginal (fixed effects)", "R² conditional (fixed + random effects)",
+                "R\u00b2 marginal (fixed effects)", "R\u00b2 conditional (fixed + random effects)",
                 "Residual SD", "Log-likelihood", "AIC", "BIC"),
     value = c(nrow(data), ng, r2[["marginal"]], r2[["conditional"]], stats::sigma(fit),
               as.numeric(stats::logLik(fit)), stats::AIC(fit), stats::BIC(fit)), stringsAsFactors = FALSE),
     labels = c(value = "Value"),
     footnotes = c(paste0("Fitted by ", if (reml) "restricted maximum likelihood (REML)" else "maximum likelihood (ML)", " with lme4. Model: ",
                          st_pretty(gsub("\\+ \\(", "+ (", paste(deparse(form, width.cutoff = 500), collapse = "")), names), "."),
-                  "R² after Nakagawa & Schielzeth: marginal = variance explained by the fixed effects; conditional = by fixed and random effects together.",
+                  "R\u00b2 after Nakagawa & Schielzeth: marginal = variance explained by the fixed effects; conditional = by fixed and random effects together.",
                   if (reml) "Use ML rather than REML when comparing AIC/BIC of models with different fixed effects.",
                   st_dropped_note(options)))
 
@@ -100,7 +100,7 @@ run <- function(data, options) {
     else "With a random slope the between-group variance depends on the value of the slope variable; the shares shown refer to the intercepts only.",
     "Random effects are assumed to be normally distributed."))
   if (singular) {
-    aui_warn(paste0("Singular fit: at least one random-effect variance was estimated as zero (or a correlation as ±1). ",
+    aui_warn(paste0("Singular fit: at least one random-effect variance was estimated as zero (or a correlation as \u00b11). ",
                     "The data do not support all the random effects in the model; the fixed-effect results are usually still usable, ",
                     "but consider removing the random ", if (!is.null(slope)) "slope" else "effect with zero variance", "."))
   }
@@ -134,7 +134,7 @@ run <- function(data, options) {
 
   icc <- vc$vcov[vc$grp == random[1] & vc$var1 == "(Intercept)" & is.na(vc$var2)] /
     sum(vc$vcov[is.na(vc$var2) & (is.na(vc$var1) | vc$var1 == "(Intercept)")])
-  lead <- sprintf("Linear mixed model with %d observations in %s (ICC for %s = %s; marginal R² = %s, conditional R² = %s).",
+  lead <- sprintf("Linear mixed model with %d observations in %s (ICC for %s = %s; marginal R\u00b2 = %s, conditional R\u00b2 = %s).",
                   nrow(data), paste(sprintf("%d levels of %s", ng, vapply(random, function(g) st_name(names, g), "")), collapse = " and "),
                   st_name(names, random[1]), formatC(icc, format = "f", digits = 3),
                   formatC(r2[["marginal"]], format = "f", digits = 3), formatC(r2[["conditional"]], format = "f", digits = 3))

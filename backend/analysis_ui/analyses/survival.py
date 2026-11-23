@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from ..core import (AnalysisError, COLORS, Context, Results, analysis, fmt_p,
+from ..core import (AnalysisError, COLORS, Context, Results, analysis,
                     new_figure, opt, stars)
 from ..graphs.types import event_indicator
 from .curve_fitting import p_phrase, parse_numbers

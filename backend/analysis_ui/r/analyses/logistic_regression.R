@@ -9,7 +9,8 @@
   grp <- cut(rank(p, ties.method = "first"), breaks = seq(0, n, length.out = g + 1), labels = FALSE)
   obs <- tapply(y, grp, sum); expd <- tapply(p, grp, sum); ng <- tapply(y, grp, length)
   chi2 <- sum((obs - expd)^2 / (expd * (1 - expd / ng)))
-  list(chi2 = chi2, df = g - 2, p = stats::pchisq(chi2, g - 2, lower.tail = FALSE), g = g)
+  list(chi2 = chi2, df = g - 2, p = stats::pchisq(chi2, g - 2, lower.tail = FALSE), g = g,
+       sparse = min(c(expd, ng - expd)) < 1)
 }
 
 .separation_message <- function(warns, se) {
@@ -60,15 +61,15 @@ run <- function(data, options) {
   tjur <- mean(phat[data$y == 1]) - mean(phat[data$y == 0])
   aui_table("Model summary", data.frame(
     Measure = c("Observations", paste0("Outcome = ", pos, " (modelled)"), paste0("Outcome = ", neg),
-                "Likelihood-ratio χ² (vs intercept-only model)", "df", "P value (overall model)",
-                "McFadden's pseudo-R²", "Tjur's R² (coefficient of discrimination)", "Nagelkerke's pseudo-R²",
+                sprintf("Likelihood-ratio \u03c7\u00b2 vs intercept-only model (df = %d)", as.integer(k)),
+                "McFadden's pseudo-R\u00b2", "Tjur's R\u00b2 (coefficient of discrimination)", "Nagelkerke's pseudo-R\u00b2",
                 "Log-likelihood", "AIC"),
-    value = c(n, n1, n0, lr, k, NA, mcfadden, tjur, nagelkerke, ll, stats::AIC(fit)),
-    p = c(rep(NA, 5), lr_p, rep(NA, 5)), stringsAsFactors = FALSE),
+    value = c(n, n1, n0, lr, mcfadden, tjur, nagelkerke, ll, stats::AIC(fit)),
+    p = c(rep(NA, 3), lr_p, rep(NA, 5)), stringsAsFactors = FALSE),
     formats = c(p = "p"), labels = c(value = "Value", p = "P value"),
     footnotes = c(paste0("Binary logistic regression (maximum likelihood) for the probability that ", yname, " = ", pos, ". Model: ",
                          st_formula_text(form, names), "."),
-                  "Pseudo-R² values are not the fraction of variance explained and are typically much lower than R² of a linear regression.",
+                  "Pseudo-R\u00b2 values are not the fraction of variance explained and are typically much lower than R\u00b2 of a linear regression.",
                   st_dropped_note(options)))
 
   # ---- coefficients and odds ratios
@@ -93,12 +94,13 @@ run <- function(data, options) {
   if (aui_flag(options, "hosmer", TRUE)) {
     hl <- .hosmer_lemeshow(data$y, phat)
     if (is.null(hl)) {
-      aui_text("Too few distinct predicted probabilities for the Hosmer–Lemeshow test.", title = "Hosmer–Lemeshow test")
+      aui_text("Too few distinct predicted probabilities for the Hosmer\u2013Lemeshow test.", title = "Hosmer\u2013Lemeshow test")
     } else {
-      aui_table("Hosmer–Lemeshow goodness-of-fit test", data.frame(
+      aui_table("Hosmer\u2013Lemeshow goodness-of-fit test", data.frame(
         chi2 = hl$chi2, df = hl$df, p = hl$p, stringsAsFactors = FALSE),
-        formats = c(df = "int", p = "p"), labels = c(chi2 = "χ²", p = "P value"),
-        footnotes = sprintf("Observed and predicted numbers of events are compared in %d groups of similar predicted probability. A small P value is evidence of poor calibration; a large P value does not prove that the model is correct (the test has low power in small samples).", hl$g))
+        formats = c(df = "int", p = "p"), labels = c(chi2 = "\u03c7\u00b2", p = "P value"),
+        footnotes = c(sprintf("Observed and predicted numbers of events are compared in %d groups of similar predicted probability. A small P value is evidence of poor calibration; a large P value does not prove that the model is correct (the test has low power in small samples).", hl$g),
+                      if (hl$sparse) "Some groups have an expected count below 1, so the \u03c7\u00b2 approximation is unreliable here; do not over-interpret this P value."))
     }
   }
 
@@ -135,7 +137,7 @@ run <- function(data, options) {
       ggplot2::geom_abline(slope = 1, intercept = 0, colour = "#7A8B99", linetype = "dashed") +
       ggplot2::geom_step(colour = AUI_COLORS[1], linewidth = 0.9) +
       ggplot2::coord_equal() +
-      ggplot2::labs(x = "1 − specificity (false-positive rate)", y = "Sensitivity (true-positive rate)",
+      ggplot2::labs(x = "1 \u2212 specificity (false-positive rate)", y = "Sensitivity (true-positive rate)",
                     title = sprintf("AUC = %s", formatC(auc, format = "f", digits = 3))) + aui_theme()
     aui_plot("ROC curve", pl, width = 4.4, height = 4.4)
   }
@@ -159,7 +161,7 @@ run <- function(data, options) {
   }
 
   sig <- or$Term[or$p < alpha]
-  txt <- sprintf("Logistic regression for %s = %s (n = %d, %d events): the model %s the intercept-only model (likelihood-ratio χ² = %s, df = %d, %s).",
+  txt <- sprintf("Logistic regression for %s = %s (n = %d, %d events): the model %s the intercept-only model (likelihood-ratio \u03c7\u00b2 = %s, df = %d, %s).",
                  yname, pos, n, as.integer(n1), if (lr_p < alpha) "fits significantly better than" else "does not fit significantly better than",
                  formatC(lr, format = "f", digits = 2), as.integer(k), st_p_text(lr_p))
   if (length(sig)) {

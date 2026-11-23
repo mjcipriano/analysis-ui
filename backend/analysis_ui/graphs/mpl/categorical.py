@@ -249,7 +249,7 @@ def draw_boxes(p: Plot, cells: list[Cell], *, whiskers: str = "tukey", outliers:
                 W["c0"].append(c.pos - cap); W["v0"].append(e); W["c1"].append(c.pos + cap); W["v1"].append(e)
                 W["col"].append(line_col)
         # the median must stand out from the fill whatever the outline is
-        med_col = p.ink if outline == "black" else darken(c.color, 0.45 if alpha > 0.5 else 0.15)
+        med_col = p.ink if outline == "black" else p.accent(c.color, 0.45 if alpha > 0.5 else 0.15)
         M["c0"].append(c.pos - med_half); M["v0"].append(s["med"]); M["c1"].append(c.pos + med_half)
         M["v1"].append(s["med"]); M["col"].append(med_col)
         if outliers and len(s["out"]):
@@ -317,7 +317,7 @@ def draw_violins(p: Plot, cells: list[Cell], *, inner: str = "box", scale: str =
                 h = float(np.interp(q, grid, hw))
                 Q["c0"].append(centre - (h if side <= 0 else 0)); Q["c1"].append(centre + (h if side >= 0 else 0))
                 Q["v0"].append(q); Q["v1"].append(q); Q["ls"].append(ls)
-                Q["col"].append(p.ink if outline == "black" else darken(c.color, 0.45))
+                Q["col"].append(p.ink if outline == "black" else p.accent(c.color, 0.45))
         elif inner in ("box", "mean_sd"):
             inner_cells.append(c)
     p.polys(shapes, facecolors=faces, edgecolors=edges if lw > 0 else "none", linewidths=lw, zorder=Z_FILL,
@@ -330,7 +330,7 @@ def draw_violins(p: Plot, cells: list[Cell], *, inner: str = "box", scale: str =
                    linestyles=Q["ls"], zorder=Z_FILL + 0.2)
     if inner_cells and side == 0:
         pos = np.array([c.pos + offset for c in inner_cells])
-        dark = [p.ink if outline == "black" else darken(c.color, 0.6) for c in inner_cells]
+        dark = [p.ink if outline == "black" else p.accent(c.color, 0.6) for c in inner_cells]
         k = max(p.fonts["base"] / 11, 0.7)
         if inner == "box":
             st = [box_stats(c.values, "tukey") for c in inner_cells]
@@ -345,7 +345,7 @@ def draw_violins(p: Plot, cells: list[Cell], *, inner: str = "box", scale: str =
             p.segments(pos, mean - sd, pos, mean + sd, colors=dark, linewidths=1.6 * k, zorder=Z_FILL + 0.2)
             mid = mean
         x, y = p.xy(pos, np.asarray(mid, dtype=float))
-        p.ax.scatter(x, y, s=(3.4 * k) ** 2, marker="o", facecolors="#FFFFFF", edgecolors=dark,
+        p.ax.scatter(x, y, s=(3.4 * k) ** 2, marker="o", facecolors=p.panel, edgecolors=dark,
                      linewidths=0.8 * k, zorder=Z_FILL + 0.4)
 
 

@@ -29,20 +29,20 @@
   df1 <- ut[, "num Df"]; df2 <- ut[, "den Df"]
   f <- ut[, "F value"]
   if (any(!is.finite(f))) aui_stop("There is no residual variation for at least one effect, so F ratios cannot be computed.")
-  corr_name <- switch(corr, gg = "Greenhouse–Geisser", hf = "Huynh–Feldt", "none")
+  corr_name <- switch(corr, gg = "Greenhouse\u2013Geisser", hf = "Huynh\u2013Feldt", "none")
   aui_table("Repeated-measures ANOVA", data.frame(
     Source = st_pretty(terms, names),
     Type = ifelse(vapply(strsplit(terms, ":", fixed = TRUE), function(t) any(t %in% within), logical(1)), "Within", "Between"),
     SS = ut[, "Sum Sq"], df = df1, SSe = ut[, "Error SS"], dfe = df2,
     F = f, eps = eps, p = p, stars = aui_stars(p), ges = ges, stringsAsFactors = FALSE),
     formats = c(p = "p", stars = "stars", df = "int", dfe = "int"),
-    labels = c(Type = "Effect type", SSe = "SS error", dfe = "df error", eps = "ε applied", p = "P value", stars = "Summary",
-               ges = "Generalized η²"),
+    labels = c(Type = "Effect type", SSe = "SS error", dfe = "df error", eps = "\u03b5 applied", p = "P value", stars = "Summary",
+               ges = "Generalized \u03b7\u00b2"),
     footnotes = c(
       "Type III sums of squares; each effect is tested against its own error term.",
       if (corr == "none" || !has_adj) "Sphericity assumed: P values use the uncorrected degrees of freedom."
       else paste0("P values of within-subjects effects with more than two levels are ", corr_name,
-                  "-corrected: both degrees of freedom are multiplied by ε."),
+                  "-corrected: both degrees of freedom are multiplied by \u03b5."),
       sprintf("%d subjects with complete data.", nlevels(droplevels(d$subject))),
       if ((options[["_n_incomplete"]] %||% 0) > 0) sprintf("%d subject(s) with missing values in some condition were excluded; the mixed-effects model option can use them.", options[["_n_incomplete"]]),
       if (isTRUE(options[["_aggregated"]])) "Several observations per subject and condition were averaged before the analysis."))
@@ -56,7 +56,7 @@
         gg = adj[match(rownames(sph), rownames(adj)), "GG eps"],
         hf = pmin(1, adj[match(rownames(sph), rownames(adj)), "HF eps"]), stringsAsFactors = FALSE),
         formats = c(p = "p"),
-        labels = c(W = "Mauchly's W", p = "P value", gg = "Greenhouse–Geisser ε", hf = "Huynh–Feldt ε"),
+        labels = c(W = "Mauchly's W", p = "P value", gg = "Greenhouse\u2013Geisser \u03b5", hf = "Huynh\u2013Feldt \u03b5"),
         footnotes = "Mauchly's test: a small P value is evidence that sphericity is violated. Epsilon = 1 means perfect sphericity.")
     } else {
       aui_text("No within-subjects factor has more than two levels, so sphericity always holds.", title = "Sphericity")
@@ -65,7 +65,7 @@
       sm <- stats::aggregate(d$y, d[, c("subject", between), drop = FALSE], mean)
       lv <- st_levene(sm$x, interaction(sm[, between, drop = FALSE], drop = TRUE), stats::median)
       aui_table("Equal variances between groups", data.frame(
-        Test = "Brown–Forsythe (Levene, median-centred)", F = lv$F, df1 = lv$df1, df2 = lv$df2, p = lv$p,
+        Test = "Brown\u2013Forsythe (Levene, median-centred)", F = lv$F, df1 = lv$df1, df2 = lv$df2, p = lv$p,
         stringsAsFactors = FALSE), formats = c(df1 = "int", df2 = "int", p = "p"), labels = c(p = "P value"),
         footnotes = "Computed on each subject's mean across the repeated measurements, across the between-subjects groups.")
     }
@@ -158,7 +158,7 @@ run <- function(data, options) {
   if (aui_flag(options, "show_plot", TRUE)) {
     pf <- factors[seq_len(min(3, length(factors)))]
     em <- st_emit_emm(fit, pf, names, alpha, levmap, emit = FALSE)
-    aui_plot(paste0("Estimated marginal means ± ", st_pct(alpha), " CI"),
+    aui_plot(paste0("Estimated marginal means \u00b1 ", st_pct(alpha), " CI"),
              st_emm_plot(em, pf, names, st_name(names, "y"), alpha), width = if (length(pf) > 2) 8 else 5.6, height = 4)
   }
   aui_summary(st_effects_summary(out$lead, out$terms, out$f, out$df1, out$df2, out$p, alpha, names))

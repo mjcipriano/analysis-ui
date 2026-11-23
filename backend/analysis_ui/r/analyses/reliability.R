@@ -61,11 +61,11 @@ run <- function(data, options) {
             labels = c(value = "Value", lower = paste(st_pct(alpha), "CI lower"), upper = paste(st_pct(alpha), "CI upper")),
             footnotes = c("Cronbach's alpha from the item covariances; confidence interval by Feldt's method (F distribution). Standardized alpha is based on the correlations (items given equal variance).",
                           if (aui_flag(options, "omega", TRUE)) (if (k < 3) "McDonald's omega needs at least three items." else "McDonald's omega (total) from a one-factor maximum-likelihood model; unlike alpha it does not assume that all items measure the construct equally well."),
-                          if (any(reversed)) paste0("Reverse-scored items (value → minimum + maximum − value): ", paste(lab[reversed], collapse = ", "), "."),
+                          if (any(reversed)) paste0("Reverse-scored items (value \u2192 minimum + maximum \u2212 value): ", paste(lab[reversed], collapse = ", "), "."),
                           st_dropped_note(options)))
   if (any(negative) && !any(reversed)) {
     aui_warn(paste0("Some items are negatively related to the rest of the scale (", paste(lab[negative], collapse = ", "),
-                    "). If they are worded in the opposite direction, reverse-score them (option “Reverse-score negatively related items”); otherwise alpha is misleadingly low."))
+                    "). If they are worded in the opposite direction, reverse-score them (option \u201cReverse-score negatively related items\u201d); otherwise alpha is misleadingly low."))
   }
 
   if (aui_flag(options, "item_stats", TRUE)) {
@@ -75,8 +75,8 @@ run <- function(data, options) {
                      note = ifelse(reversed, "reversed", ifelse(!is.na(dropped) & dropped > a + 1e-9, "alpha rises if dropped", "")),
                      stringsAsFactors = FALSE)
     aui_table("Item statistics", it,
-              labels = c(mean = "Mean", sd = "SD", rest = "Item–rest correlation", dropped = "Alpha if item dropped", note = "Note"),
-              footnotes = c("Item–rest correlation: correlation of the item with the sum of the other items (corrected item–total correlation); values below about 0.3 suggest the item fits the scale poorly.",
+              labels = c(mean = "Mean", sd = "SD", rest = "Item\u2013rest correlation", dropped = "Alpha if item dropped", note = "Note"),
+              footnotes = c("Item\u2013rest correlation: correlation of the item with the sum of the other items (corrected item\u2013total correlation); values below about 0.3 suggest the item fits the scale poorly.",
                             if (k < 3) "Alpha if item dropped needs at least three items."))
   }
 

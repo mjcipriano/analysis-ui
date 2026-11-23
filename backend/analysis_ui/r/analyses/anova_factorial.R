@@ -20,22 +20,22 @@ run <- function(data, options) {
   if (anyNA(stats::coef(fit))) {
     if (length(empty)) {
       aui_stop("Some combinations of factor levels have no data (", paste(utils::head(empty, 3), collapse = "; "),
-               if (length(empty) > 3) "; …" else "", "), so not all interactions can be estimated. ",
-               "Choose “Main effects only” (or fewer interactions) under Model, or remove a factor.")
+               if (length(empty) > 3) "; \u2026" else "", "), so not all interactions can be estimated. ",
+               "Choose \u201cMain effects only\u201d (or fewer interactions) under Model, or remove a factor.")
     }
     aui_stop("The model terms are perfectly confounded with one another (for example two factors that define ",
              "the same groups, or a covariate that is constant within groups), so their effects cannot be separated. Remove one of them.")
   }
   if (stats::df.residual(fit) < 1) {
     aui_stop("There is only one observation per combination of factor levels, so no residual variation is left to test ",
-             "the full model. Choose “Main effects only” under Model (the interaction then serves as the error term), or add replicates.")
+             "the full model. Choose \u201cMain effects only\u201d under Model (the interaction then serves as the error term), or add replicates.")
   }
   ss_res <- sum(stats::residuals(fit)^2)
   ss_tot <- sum((data$y - mean(data$y))^2)
   if (ss_res <= ss_tot * 1e-14) aui_stop("The model reproduces the data exactly (no residual variation), so F ratios cannot be computed.")
   if (length(empty)) {
     aui_warn(paste0("Some combinations of factor levels have no data (", paste(utils::head(empty, 3), collapse = "; "),
-                    if (length(empty) > 3) "; …" else "", "). Estimated marginal means involving these cells are not available."))
+                    if (length(empty) > 3) "; \u2026" else "", "). Estimated marginal means involving these cells are not available."))
   }
 
   a <- as.data.frame(st_try(car::Anova(fit, type = type), "The ANOVA table could not be computed for this design."))
@@ -51,12 +51,12 @@ run <- function(data, options) {
   balanced <- length(unique(as.vector(table(data[, factors, drop = FALSE])))) == 1
   title <- paste0(if (length(covs)) "ANCOVA" else "ANOVA", " table")
   aui_table(title, tab, formats = c(df = "int", p = "p", stars = "stars"),
-            labels = c(p = "P value", stars = "Summary", eta_p = "Partial η²"),
+            labels = c(p = "P value", stars = "Summary", eta_p = "Partial \u03b7\u00b2"),
             footnotes = c(
               paste0("Type ", if (type == 3) "III" else "II", " sums of squares",
                      if (type == 3) " (each effect adjusted for all others; sum-to-zero contrasts)" else " (each effect adjusted for the others, ignoring interactions that contain it)",
                      if (balanced && !length(covs)) "; the design is balanced, so Type II and III agree." else if (!balanced) "; the design is unbalanced, so the sums of squares need not add up to the total." else "."),
-              "Partial η² = SS effect / (SS effect + SS residual).",
+              "Partial \u03b7\u00b2 = SS effect / (SS effect + SS residual).",
               if (length(covs)) "Covariate effects are slopes adjusted for the factors; factor effects are adjusted for the covariates.",
               st_dropped_note(options)))
 
@@ -82,7 +82,7 @@ run <- function(data, options) {
     cell <- interaction(data[, factors, drop = FALSE], drop = TRUE)
     lv <- st_levene(if (length(covs)) res else data$y, cell, stats::median)
     aui_table("Equal variances", data.frame(
-      Test = "Brown–Forsythe (Levene, median-centred)", F = lv$F, df1 = lv$df1, df2 = lv$df2, p = lv$p,
+      Test = "Brown\u2013Forsythe (Levene, median-centred)", F = lv$F, df1 = lv$df1, df2 = lv$df2, p = lv$p,
       stringsAsFactors = FALSE), formats = c(df1 = "int", df2 = "int", p = "p"), labels = c(p = "P value"),
       footnotes = c(paste0("Compares the spread of ", if (length(covs)) "the residuals" else "the values", " across all ",
                            nlevels(cell), " cells of the design. A small P value is evidence of unequal variances."),
@@ -94,8 +94,8 @@ run <- function(data, options) {
   if (aui_flag(options, "show_plot", TRUE)) {
     pf <- factors[seq_len(min(3, nf))]
     em <- st_emit_emm(fit, pf, names, alpha, emit = FALSE)
-    aui_plot(if (nf > 1) paste0("Interaction plot (estimated marginal means ± ", st_pct(alpha), " CI)")
-             else paste0("Estimated marginal means ± ", st_pct(alpha), " CI"),
+    aui_plot(if (nf > 1) paste0("Interaction plot (estimated marginal means \u00b1 ", st_pct(alpha), " CI)")
+             else paste0("Estimated marginal means \u00b1 ", st_pct(alpha), " CI"),
              st_emm_plot(em, pf, names, ylab, alpha), width = if (nf > 2) 8 else 5.6, height = 4)
   }
 

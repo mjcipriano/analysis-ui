@@ -10,7 +10,7 @@ run <- function(data, options) {
   has_offset <- isTRUE(options[["_has_offset"]])
   yname <- st_name(names, "y")
   if (isTRUE(options[["_noninteger"]])) {
-    if (family != "quasipoisson") aui_stop("“", yname, "” contains non-integer values. Poisson and negative-binomial regression are for counts (0, 1, 2, …). ",
+    if (family != "quasipoisson") aui_stop("\u201c", yname, "\u201d contains non-integer values. Poisson and negative-binomial regression are for counts (0, 1, 2, \u2026). ",
                                          "For rates, model the counts and give the denominator as the exposure; for other non-integer data choose quasi-Poisson.")
   }
 
@@ -51,8 +51,8 @@ run <- function(data, options) {
 
   # ---- model summary
   dev <- stats::deviance(fit)
-  tab <- data.frame(Measure = c("Observations", "Sum of counts", "Residual deviance", "Residual df", "Pearson χ²",
-                                "Dispersion (Pearson χ² / df, Poisson model)"),
+  tab <- data.frame(Measure = c("Observations", "Sum of counts", "Residual deviance", "Residual df", "Pearson \u03c7\u00b2",
+                                "Dispersion (Pearson \u03c7\u00b2 / df, Poisson model)"),
                     value = c(n, sum(data$y), dev, dfr, sum(stats::residuals(fit, type = "pearson")^2), disp),
                     p = NA_real_, stringsAsFactors = FALSE)
   lr_txt <- ""
@@ -61,9 +61,9 @@ run <- function(data, options) {
     if (!is.null(null)) {
       lr <- max(0, 2 * (as.numeric(stats::logLik(fit)) - as.numeric(stats::logLik(null))))
       lr_p <- stats::pchisq(lr, k, lower.tail = FALSE)
-      tab <- rbind(tab, data.frame(Measure = c(sprintf("Likelihood-ratio χ² vs intercept-only model (df = %d)", as.integer(k)), "Log-likelihood", "AIC"),
+      tab <- rbind(tab, data.frame(Measure = c(sprintf("Likelihood-ratio \u03c7\u00b2 vs intercept-only model (df = %d)", as.integer(k)), "Log-likelihood", "AIC"),
                                    value = c(lr, as.numeric(stats::logLik(fit)), stats::AIC(fit)), p = c(lr_p, NA, NA), stringsAsFactors = FALSE))
-      lr_txt <- sprintf(" The predictors together %s (likelihood-ratio χ² = %s, df = %d, %s).",
+      lr_txt <- sprintf(" The predictors together %s (likelihood-ratio \u03c7\u00b2 = %s, df = %d, %s).",
                         if (lr_p < alpha) "improve the fit significantly" else "do not improve the fit significantly",
                         formatC(lr, format = "f", digits = 2), as.integer(k), st_p_text(lr_p))
     }
@@ -76,8 +76,8 @@ run <- function(data, options) {
             footnotes = c(paste0(fam_name, " regression with log link", if (has_offset) paste0("; log(", st_name(names, "expo"), ") is an offset, so coefficients describe rates per unit of ", st_name(names, "expo")) else "",
                                  ". Model: ", st_pretty(paste("y ~", rhs), names), "."),
                           if (family == "poisson") "Deviance goodness-of-fit test: a small P value means the Poisson model does not fit (often because of overdispersion).",
-                          if (family == "negbin") "Variance = mean + mean² / theta; small theta means strong overdispersion.",
-                          if (family == "quasipoisson") "Quasi-Poisson keeps the Poisson coefficients but multiplies their standard errors by √dispersion; no likelihood, so AIC and likelihood-ratio tests are not available.",
+                          if (family == "negbin") "Variance = mean + mean\u00b2 / theta; small theta means strong overdispersion.",
+                          if (family == "quasipoisson") "Quasi-Poisson keeps the Poisson coefficients but multiplies their standard errors by \u221adispersion; no likelihood, so AIC and likelihood-ratio tests are not available.",
                           nb_note, st_dropped_note(options)))
 
   # ---- overdispersion advice

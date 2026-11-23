@@ -28,7 +28,7 @@
   eps <- switch(mode, gg = sph$gg, hf = sph$hf, 1)
   p_t <- stats::pf(f_t, df_t * eps, df_r * eps, lower.tail = FALSE)
   p_s <- stats::pf(f_s, df_s, df_r, lower.tail = FALSE)
-  corr_name <- switch(mode, gg = "Greenhouse–Geisser", hf = "Huynh–Feldt", "none")
+  corr_name <- switch(mode, gg = "Greenhouse\u2013Geisser", hf = "Huynh\u2013Feldt", "none")
 
   aui_table("Repeated-measures one-way ANOVA", data.frame(
     Source = c("Treatment (between conditions)", "Subjects (matching)", "Residual", "Total"),
@@ -42,12 +42,12 @@
       if (mode == "assume") "Sphericity assumed: P values use the uncorrected degrees of freedom."
       else sprintf("Sphericity not assumed: the treatment P value uses degrees of freedom multiplied by the %s epsilon (%s).",
                    corr_name, formatC(eps, format = "f", digits = 4)),
-      sprintf("%d subjects × %d conditions.", n, k),
+      sprintf("%d subjects \u00d7 %d conditions.", n, k),
       st_dropped_note(options, "subject")))
 
   eta_p <- ss_t / (ss_t + ss_r)
   aui_table("Effect size and matching", data.frame(
-    Measure = c("Partial eta squared (treatment)", "R² (treatment / total)", "Was the matching effective? F", "Matching: P value"),
+    Measure = c("Partial eta squared (treatment)", "R\u00b2 (treatment / total)", "Was the matching effective? F", "Matching: P value"),
     value = c(eta_p, ss_t / ss_tot, f_s, p_s), stringsAsFactors = FALSE),
     labels = c(value = "Value"),
     footnotes = if (p_s < alpha) "Subjects differ significantly from one another, so matching (repeated measures) removed real between-subject variation and increased power."
@@ -78,8 +78,8 @@
         W = sph$W, chi2 = sph$chi2, df = sph$df, p = sph$p, gg = sph$gg, hf = sph$hf, lb = sph$lb,
         stringsAsFactors = FALSE),
         formats = c(df = "int", p = "p"),
-        labels = c(W = "Mauchly's W", chi2 = "χ²", p = "P value", gg = "Greenhouse–Geisser ε",
-                   hf = "Huynh–Feldt ε", lb = "Lower-bound ε"),
+        labels = c(W = "Mauchly's W", chi2 = "\u03c7\u00b2", p = "P value", gg = "Greenhouse\u2013Geisser \u03b5",
+                   hf = "Huynh\u2013Feldt \u03b5", lb = "Lower-bound \u03b5"),
         footnotes = c("Mauchly's test: a small P value is evidence that sphericity (equal variances of all pairwise differences) is violated. The test has little power in small samples, so correcting by default is the safer choice.",
                       "Epsilon = 1 means perfect sphericity; smaller values mean stronger violation.",
                       if (is.na(sph$W)) "Mauchly's test needs more subjects than conditions."))
@@ -90,7 +90,7 @@
   }
   if (aui_flag(options, "qq_plot")) aui_plot("QQ plot of residuals", st_qq_plot(as.vector(res)), width = 4.6, height = 3.8)
 
-  txt <- sprintf("Repeated-measures ANOVA%s: the means of the %d conditions %s (%s, %s; partial η² = %s).",
+  txt <- sprintf("Repeated-measures ANOVA%s: the means of the %d conditions %s (%s, %s; partial \u03b7\u00b2 = %s).",
                  if (mode == "assume") "" else paste0(" with ", corr_name, " correction"), k,
                  if (p_t < alpha) "differ significantly" else "do not differ significantly",
                  st_fmt_f(f_t, df_t * eps, df_r * eps), st_p_text(p_t), formatC(eta_p, format = "f", digits = 3))
@@ -173,8 +173,8 @@ run <- function(data, options) {
              width = max(4.2, min(9, 1.6 + 0.9 * k)), height = 3.9)
   }
   txt <- out$text
-  if (!is.na(out$n_sig)) txt <- paste0(txt, sprintf(" %d of %d comparison%s significant at α = %s.",
+  if (!is.na(out$n_sig)) txt <- paste0(txt, sprintf(" %d of %d comparison%s significant at \u03b1 = %s.",
                                                     out$n_sig, out$n_cmp, if (out$n_cmp == 1) " is" else "s are", format(alpha)))
   aui_summary(txt)
-  aui_graph("Create a before–after graph of these data", "before_after", st_layout_options(options))
+  aui_graph("Create a before\u2013after graph of these data", "before_after", st_layout_options(options))
 }

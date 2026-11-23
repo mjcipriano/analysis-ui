@@ -49,10 +49,10 @@ run <- function(data, options) {
              "so an F ratio cannot be computed.")
   }
   if (variant != "ordinary") {
-    if (any(s$n < 2)) aui_stop("Welch's and Brown–Forsythe ANOVA need at least two values in every group. ",
-                               "Group “", lev[which(s$n < 2)[1]], "” has only one.")
-    if (any(s$var <= 0)) aui_stop("Group “", lev[which(s$var <= 0)[1]], "” has no variation (all its values are identical), ",
-                                  "so Welch's and Brown–Forsythe ANOVA cannot be computed.")
+    if (any(s$n < 2)) aui_stop("Welch's and Brown\u2013Forsythe ANOVA need at least two values in every group. ",
+                               "Group \u201c", lev[which(s$n < 2)[1]], "\u201d has only one.")
+    if (any(s$var <= 0)) aui_stop("Group \u201c", lev[which(s$var <= 0)[1]], "\u201d has no variation (all its values are identical), ",
+                                  "so Welch's and Brown\u2013Forsythe ANOVA cannot be computed.")
   }
 
   msb <- s$ssb / s$dfb; msw <- s$ssw / s$dfw
@@ -74,11 +74,11 @@ run <- function(data, options) {
       footnotes = "Ordinary one-way ANOVA; assumes that the groups are sampled from normal populations with equal SDs.")
   } else {
     main <- if (variant == "welch") .welch_anova(s) else .brown_forsythe_anova(s)
-    test_name <- if (variant == "welch") "Welch's ANOVA" else "Brown–Forsythe ANOVA"
-    aui_table(paste0(if (variant == "welch") "Welch's" else "Brown–Forsythe", " ANOVA"), data.frame(
+    test_name <- if (variant == "welch") "Welch's ANOVA" else "Brown\u2013Forsythe ANOVA"
+    aui_table(paste0(if (variant == "welch") "Welch's" else "Brown\u2013Forsythe", " ANOVA"), data.frame(
       F = main$F, df1 = main$df1, df2 = main$df2, p = main$p, stars = aui_stars(main$p), stringsAsFactors = FALSE),
       formats = c(df1 = "int", p = "p", stars = "stars"),
-      labels = c(F = if (variant == "welch") "W (Welch's F)" else "F* (Brown–Forsythe)", df1 = "df (numerator)",
+      labels = c(F = if (variant == "welch") "W (Welch's F)" else "F* (Brown\u2013Forsythe)", df1 = "df (numerator)",
                  df2 = "df (denominator)", p = "P value", stars = "Summary"),
       footnotes = paste0(test_name, "; does not assume equal SDs. The denominator df is ",
                          if (variant == "welch") "Welch's" else "Satterthwaite's", " approximation."))
@@ -89,10 +89,10 @@ run <- function(data, options) {
   }
   ci <- st_eta2_ci(f_ord, s$dfb, s$dfw, 1 - alpha)
   aui_table("Effect size", data.frame(
-    Measure = c("R² (eta squared)", "Omega squared"), value = c(eta2, omega2),
+    Measure = c("R\u00b2 (eta squared)", "Omega squared"), value = c(eta2, omega2),
     lower = c(ci[1], NA), upper = c(ci[2], NA), stringsAsFactors = FALSE),
     labels = c(value = "Value", lower = paste(st_pct(alpha), "CI lower"), upper = paste(st_pct(alpha), "CI upper")),
-    footnotes = c("R² = SS between / SS total: the fraction of the total variation explained by group membership. Omega squared is a less biased estimate of the same quantity.",
+    footnotes = c("R\u00b2 = SS between / SS total: the fraction of the total variation explained by group membership. Omega squared is a less biased estimate of the same quantity.",
                   "Confidence interval from the noncentral F distribution."))
 
   if (aui_flag(options, "descriptives", TRUE)) {
@@ -147,14 +147,14 @@ run <- function(data, options) {
     bf <- st_levene(value, group, stats::median)
     bt <- if (all(s$n >= 2) && all(s$var > 0)) tryCatch(stats::bartlett.test(value, group), error = function(e) NULL) else NULL
     aui_table("Equal variances", data.frame(
-      Test = c("Brown–Forsythe (Levene, median-centred)", "Bartlett"),
-      stat_name = c("F", "K²"),
+      Test = c("Brown\u2013Forsythe (Levene, median-centred)", "Bartlett"),
+      stat_name = c("F", "K\u00b2"),
       statistic = c(bf$F, if (is.null(bt)) NA else unname(bt$statistic)),
       df = c(sprintf("%d, %d", bf$df1, bf$df2), if (is.null(bt)) "" else as.character(unname(bt$parameter))),
       p = c(bf$p, if (is.null(bt)) NA else bt$p.value), stringsAsFactors = FALSE),
       formats = c(p = "p"), labels = c(stat_name = "Statistic", statistic = "Value", p = "P value"),
-      footnotes = c("A small P value is evidence that the group SDs differ. Bartlett's test is sensitive to non-normality; the Brown–Forsythe test is more robust.",
-                    if (variant == "ordinary" && !is.na(bf$p) && bf$p < alpha) "The SDs appear to differ: consider Welch's ANOVA with Games–Howell comparisons."))
+      footnotes = c("A small P value is evidence that the group SDs differ. Bartlett's test is sensitive to non-normality; the Brown\u2013Forsythe test is more robust.",
+                    if (variant == "ordinary" && !is.na(bf$p) && bf$p < alpha) "The SDs appear to differ: consider Welch's ANOVA with Games\u2013Howell comparisons."))
     st_emit_normality(res, alpha)
   }
   if (aui_flag(options, "qq_plot")) aui_plot("QQ plot of residuals", st_qq_plot(res), width = 4.6, height = 3.8)
@@ -167,12 +167,12 @@ run <- function(data, options) {
   }
 
   # ---- summary
-  txt <- sprintf("%s: the group means %s (%s, P = %s; R² = %s).",
+  txt <- sprintf("%s: the group means %s (%s, P = %s; R\u00b2 = %s).",
                  sub("^(.)", "\\U\\1", test_name, perl = TRUE),
                  if (main$p < alpha) "differ significantly" else "do not differ significantly",
                  st_fmt_f(main$F, main$df1, main$df2), aui_fmt_p(main$p), formatC(eta2, format = "f", digits = 3))
   if (!is.na(n_sig)) {
-    txt <- paste0(txt, sprintf(" %d of %d comparison%s %s significant at α = %s (%s).",
+    txt <- paste0(txt, sprintf(" %d of %d comparison%s %s significant at \u03b1 = %s (%s).",
                                n_sig, n_cmp, if (n_cmp == 1) "" else "s", if (n_sig == 1) "is" else "are",
                                format(alpha), sub("\\s*\\(.*$", "", cmp_method)))
   }
