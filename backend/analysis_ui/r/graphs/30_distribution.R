@@ -131,6 +131,7 @@ render_density <- function(ctx) {
   peak <- max(dens$y, 0)
   if (!is.finite(peak) || peak <= 0) peak <- 1
   gi <- as.integer(dens$group)
+  dens$gi <- gi
   dens$base <- k - gi
   dens$top <- dens$base + dens$y / peak * overlap
   ymax <- max(dens$top, k - 1 + 0.3)
@@ -146,7 +147,7 @@ render_density <- function(ctx) {
   layers <- list(
     geom_hline(yintercept = k - seq_len(k), colour = ctx$th$grid_color, linewidth = lw(0.6)),
     geom_ribbon(aes(x = .data$x, ymin = .data$base, ymax = .data$top, fill = .data$key, colour = .data$key,
-                    group = gi), data = dens, alpha = alpha, linewidth = lw(line_pt), outline.type = "upper",
+                    group = .data$gi), data = dens, alpha = alpha, linewidth = lw(line_pt), outline.type = "upper",
                 show.legend = legend != "none"))
   if (has_rows(rug)) {
     rug$base <- k - as.integer(rug$group)

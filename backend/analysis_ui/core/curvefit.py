@@ -369,17 +369,21 @@ class Fit:
             return float(np.sum(w * (self.y - pred) ** 2)), np.empty(0)
         cm = constrain_model(self.model, {names[index]: float(value)})
         starts = [np.asarray(start, dtype=float)]
+        maxfev = 300 * len(names)
         if thorough:
             try:
                 starts.append(np.asarray([float(v) for v in cm.guess(self.x, self.y)]))
             except Exception:
                 pass
             rng = np.random.default_rng(1)
-            starts += [starts[0] * rng.uniform(0.5, 2.0, len(starts[0])) for _ in range(4)]
+            starts += [starts[0] * rng.uniform(0.5, 2.0, len(starts[0])) for _ in range(2)]
         best: tuple[float, np.ndarray] | None = None
         for s0 in starts:
+            self._profile_budget -= 1
+            if self._profile_budget < 0:
+                raise RuntimeError("profile search budget exhausted")
             try:
-                others, _ = _lsq(cm, self.x, self.y, sigma, s0)
+                others, _ = _lsq(cm, self.x, self.y, sigma, s0, maxfev)
                 ss = float(np.sum(w * (self.y - cm.func(self.x, *others)) ** 2))
             except Exception:
                 continue
@@ -397,7 +401,8 @@ class Fit:
         re-minimised over all *other* parameters, has risen to
         ``SS_min · (1 + F(level; 1, dof) / dof)``. A limit that cannot be
         found (the SS never rises that far, the parameter runs into a bound of
-        the model, or the refit fails) is NaN — "very wide" in Prism's terms.
+        the model, the refit fails, or the search uses up its budget of
+        refits) is NaN — "very wide" in Prism's terms.
         With weighting, the weights of the best fit are kept fixed."""
         cache = self.__dict__.setdefault("_profile_cache", {})
         if level in cache:
@@ -410,6 +415,7 @@ class Fit:
             for i, name in enumerate(names):
                 lims = []
                 for sign in (-1.0, 1.0):
+                    self._profile_budget = 70     # refits allowed per limit; beyond that the limit is "very wide"
                     bound = None if bounds is None else bounds[0 if sign < 0 else 1][i]
                     try:
                         with np.errstate(all="ignore"):
@@ -426,7 +432,7 @@ class Fit:
         step = se if np.isfinite(se) and se > 0 else max(abs(best) * 0.1, 1e-3)
         prev_v, prev_p = best, np.delete(self.popt, i)
         delta = step * 0.5
-        for _ in range(60):
+        for _ in range(40):
             v = prev_v + sign * delta
             at_bound = False
             if bound is not None and np.isfinite(bound) and (v - bound) * sign >= 0:
@@ -440,7 +446,7 @@ class Fit:
                 def g(val):
                     s_, p_ = self._profile_ss(i, val, state["p"])
                     return s_ - target
-                root = float(optimize.brentq(g, prev_v, v, xtol=1e-9 * max(abs(best), step), rtol=1e-10, maxiter=200))
+                root = float(optimize.brentq(g, prev_v, v, xtol=1e-7 * max(abs(best), step), rtol=1e-9, maxiter=60))
                 ss_r, p_r = self._profile_ss(i, root, prev_p, thorough=True)
                 if ss_r >= target * (1 - 1e-4):
                     return root
@@ -449,7 +455,7 @@ class Fit:
             if at_bound or abs(v - best) > 1e6 * step:
                 return float("nan")
             prev_v, prev_p = v, p
-            delta *= 1.7
+            delta *= 2.0
         return float("nan")
 
     def equation_text(self, digits: int = 4) -> str:

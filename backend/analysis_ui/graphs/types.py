@@ -155,7 +155,11 @@ def faceted(prep):
         brackets, fits, used, warnings = [], [], [], list(full.warnings)
         for lev in levels:
             mask = (f.astype(object) == lev).to_numpy()
-            sub = Context(ctx.df[mask].reset_index(drop=True), ctx.options)
+            sub_opts = ctx.options
+            if "density" in full.frames:      # same smoothing grid in every panel
+                gx = full.frames["density"]["x"]
+                sub_opts = dict(ctx.options, _grid=(float(gx.min()), float(gx.max())))
+            sub = Context(ctx.df[mask].reset_index(drop=True), sub_opts)
             sub._labels = ctx._labels
             try:
                 part = prep(sub)
@@ -729,7 +733,8 @@ def _prep_density(ctx: Context) -> Prepared:
     groups = [str(c) for c in long["group"].cat.categories]
     v = long["value"].to_numpy(dtype=float)
     pad = 0.15 * (np.ptp(v) or 1.0)
-    grid = np.linspace(v.min() - pad, v.max() + pad, 300)
+    lo, hi = ctx.options.get("_grid") or (v.min() - pad, v.max() + pad)
+    grid = np.linspace(lo, hi, 300)
     rows = []
     for g in groups:
         vals = long.loc[long["group"] == g, "value"].to_numpy(dtype=float)
