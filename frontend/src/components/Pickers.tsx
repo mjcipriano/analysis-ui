@@ -104,7 +104,7 @@ function GraphIcon({ type }: { type: string }) {
 export function GraphThumb({ def }: { def: GraphDef }) {
   const [failed, setFailed] = useState(false)
   if (failed) return <GraphIcon type={def.id in ICON_IDS ? def.id : def.render_type} />
-  return <img className="graph-thumb-img" src={`/thumbs/${def.id}.svg`} alt="" loading="lazy" onError={() => setFailed(true)} />
+  return <img className="graph-thumb-img" src={`/thumbs/${def.id}.png`} alt="" loading="lazy" onError={() => setFailed(true)} />
 }
 const ICON_IDS: Record<string, true> = { xy_line: true, xy_regression: true, dose_response: true, bubble: true, donut: true, ridgeline: true, corr_matrix: true }
 

@@ -15,13 +15,37 @@ interface Props {
   searchable?: boolean
   /** sections opened by default (others start collapsed) */
   openSections?: string[]
+  /** reveal and focus one option (e.g. after double-clicking the graph) */
+  focus?: { name: string; nonce: number } | null
 }
 
 const openState = new Map<string, boolean>()
 
-export function OptionsForm({ schema, values, sheet, onChange, groups, scope, searchable, openSections }: Props) {
+export function OptionsForm({ schema, values, sheet, onChange, groups, scope, searchable, openSections, focus }: Props) {
   const [query, setQuery] = useState('')
   const [, force] = useState(0)
+  const root = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!focus) return
+    const def = schema.find((o) => o.name === focus.name)
+    if (!def) return
+    setQuery('')
+    if (def.section) openState.set(`${scope}:${def.section}`, true)
+    force((n) => n + 1)
+    const t = window.setTimeout(() => {
+      const el = root.current?.querySelector<HTMLElement>(`[data-opt="${focus.name}"]`)
+      if (!el) return
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el.classList.remove('flash')
+      void el.offsetWidth
+      el.classList.add('flash')
+      const input = el.querySelector<HTMLElement>('input:not([type=range]):not([type=color]), select, textarea')
+      input?.focus({ preventScroll: true })
+      if (input instanceof HTMLInputElement && input.type === 'text') input.select()
+    }, 60)
+    return () => window.clearTimeout(t)
+  }, [focus?.nonce])   // eslint-disable-line react-hooks/exhaustive-deps
   const visible = useMemo(() => schema.filter((o) => isVisible(o, values)), [schema, values])
   const q = query.trim().toLowerCase()
   const shown = q ? visible.filter((o) => `${o.label} ${o.section ?? ''} ${o.choices?.map((c) => c.label).join(' ') ?? ''}`.toLowerCase().includes(q)) : visible
@@ -44,7 +68,7 @@ export function OptionsForm({ schema, values, sheet, onChange, groups, scope, se
   const toggle = (name: string, index: number) => { openState.set(`${scope}:${name}`, !isOpen(name, index)); force((n) => n + 1) }
 
   return (
-    <div className="options">
+    <div className="options" ref={root}>
       {searchable && (
         <div className="options-search">
           <Icon name="search" size={14} />
@@ -89,14 +113,14 @@ function Field(p: FieldProps) {
   const { def } = p
   if (def.type === 'bool') {
     return (
-      <label className="field check" title={def.help}>
+      <label className="field check" title={def.help} data-opt={def.name}>
         <input type="checkbox" checked={!!p.value} onChange={(e) => p.onChange(e.target.checked)} />
         <span>{def.label}</span>
       </label>
     )
   }
   return (
-    <div className={`field ${def.type}`}>
+    <div className={`field ${def.type}`} data-opt={def.name}>
       <div className="field-label" title={def.help}>{def.label}</div>
       <div className="field-control">
         {def.type === 'variable' && <VarPicker {...p} />}

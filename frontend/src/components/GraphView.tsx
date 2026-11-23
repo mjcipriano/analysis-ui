@@ -120,6 +120,7 @@ export function GraphView({ item }: { item: GraphItem }) {
   const [zoom, setZoom] = useState<number | 'fit'>('fit')
   const stage = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 800, h: 600 })
+  const [focus, setFocus] = useState<{ name: string; nonce: number } | null>(null)
 
   useLayoutEffect(() => {
     const el = stage.current
@@ -144,6 +145,24 @@ export function GraphView({ item }: { item: GraphItem }) {
   const scale = zoom === 'fit' ? Math.max(0.2, Math.min(fit, 2.2)) : zoom
   const has = (name: string) => def.options.some((o) => o.name === name)
   const geometrySections = [...new Set(def.options.map((o) => o.section ?? ''))].filter((s) => !['Data', 'Titles & labels', 'Colors & theme', 'Axes', 'Legend', 'Fonts', 'Size', 'Significance', ''].includes(s))
+
+  /**
+   * Double-clicking a region of the graph jumps to the matching setting:
+   * the top edge is the title, the edges next to the axes are the axis titles,
+   * the right-hand margin is the legend and the middle is the data.
+   */
+  const jumpTo = (e: React.MouseEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height
+    const flip = !!item.options.flip
+    const order = fy < 0.13 ? ['title']
+      : fy > 0.87 ? [flip ? 'y_label' : 'x_label', 'caption']
+      : fx < 0.12 ? [flip ? 'x_label' : 'y_label']
+      : fx > 0.86 ? ['legend_position', 'legend_title', 'palette']
+      : [def.options.find((o) => geometrySections.includes(o.section ?? ''))?.name ?? 'palette', 'palette', 'colormap']
+    const name = order.find((n) => has(n)) ?? 'title'
+    setFocus({ name, nonce: Date.now() })
+  }
 
   const copyImage = async () => {
     if (!sheet) return
@@ -238,7 +257,8 @@ export function GraphView({ item }: { item: GraphItem }) {
           )}
           {sheet && item.svg && item.status !== 'incomplete' && item.status !== 'error' && (
             <div className={`graph-paper ${item.status === 'running' ? 'stale' : ''} ${item.options.transparent ? 'checker' : ''}`}
-              style={{ width: natW * scale, height: natH * scale }}>
+              style={{ width: natW * scale, height: natH * scale }} onDoubleClick={jumpTo}
+              title="Double-click the title, an axis or the data to edit it">
               <img src={svgUrl(item.svg)} alt={item.name} draggable={false} style={{ width: '100%', height: '100%' }} />
             </div>
           )}
@@ -258,7 +278,7 @@ export function GraphView({ item }: { item: GraphItem }) {
           </div>
         </div>
         <OptionsForm schema={def.options} values={item.options} sheet={sheet} scope={`g:${def.render_type}`} searchable
-          groups={item.meta?.groups} onChange={(patch) => setOptions(item.id, patch)}
+          groups={item.meta?.groups} onChange={(patch) => setOptions(item.id, patch)} focus={focus}
           openSections={['Data', 'Titles & labels', ...geometrySections.slice(0, 1)]} />
       </aside>
       {exporting && sheet && <ExportDialog item={item} def={def} sheet={sheet} onClose={() => setExporting(false)} />}

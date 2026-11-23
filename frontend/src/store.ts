@@ -527,3 +527,6 @@ export async function restoreSession() {
     }, 800)
   })
 }
+
+// Handy for debugging and automated UI tests.
+;(window as any).__aui = useStore

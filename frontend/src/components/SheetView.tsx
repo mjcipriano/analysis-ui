@@ -351,7 +351,7 @@ export function SheetView({ sheet, onAnalyze, onGraph }: { sheet: Sheet; onAnaly
       {!hasData && (
         <div className="hint-bar">
           <Icon name="info" size={15} />
-          <span>Type or paste your data (Ctrl/⌘+V) — a pasted header row becomes the column names. Click a column header to rename it or change its type.
+          <span>Type or paste your data (Ctrl/⌘+V) — a pasted header row becomes the column names. Use the ▾ on a column header (or right-click it) to rename it or change its type.
             Put each group in its own column <i>or</i> use one column for values and another for group names; both work everywhere.</span>
         </div>
       )}
@@ -361,7 +361,7 @@ export function SheetView({ sheet, onAnalyze, onGraph }: { sheet: Sheet; onAnaly
           rows={sheet.nrows}
           getCellContent={getCellContent}
           onCellsEdited={onCellsEdited as any}
-          onCellEdited={() => undefined}
+          onCellEdited={(location, value) => { onCellsEdited([{ location, value }]) }}
           onPaste={onPaste}
           onDelete={onDelete}
           getCellsForSelection={true}
