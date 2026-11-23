@@ -33,7 +33,7 @@ aui_load <- function(subdir, script) {
   hit <- .aui_cache[[key]]
   if (is.null(hit) || hit$mtime != mtime) {
     env <- new.env(parent = globalenv())
-    sys.source(path, envir = env, encoding = "UTF-8")
+    source(path, local = env, encoding = "UTF-8")
     hit <- list(env = env, mtime = mtime)
     .aui_cache[[key]] <- hit
   }
