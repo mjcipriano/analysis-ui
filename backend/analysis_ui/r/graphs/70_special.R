@@ -98,7 +98,8 @@ render_volcano <- function(ctx) {
     all(is.finite(xr)) && xr[1] < 0 && xr[2] > 0
   if (symmetric) xr <- c(-1, 1) * max(abs(xr), xt * 1.15)
   ax_x <- axis_spec(ctx, "x", xr, mult = c(0.06, 0.06))
-  ax_y <- axis_spec(ctx, "y", finite_range(d$y, 0), zero = TRUE, flush = TRUE, mult = c(0, 0.08))
+  has_labels <- any(!is.na(d$label) & nzchar(d$label))
+  ax_y <- axis_spec(ctx, "y", finite_range(d$y, 0), zero = TRUE, flush = TRUE, mult = c(0, if (has_labels) 0.14 else 0.06))
   legend <- legend_position(ctx, "right")
   d <- d[on_scale(ax_x, d$x) & (on_scale(ax_y, d$y) | !ax_y$is_log), , drop = FALSE]
   layers <- list()

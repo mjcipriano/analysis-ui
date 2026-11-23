@@ -51,9 +51,8 @@ render_xy <- function(ctx) {
     fy <- fit$y[is.finite(fit$y)]
     yr <- range(yr, pmin(pmax(fy, yr[1] - slack), yr[2] + slack))
   }
-  ax_x <- axis_spec(ctx, "x", finite_range(main$x, if (has_fit) fit$x))
+  ax_x <- axis_spec(ctx, "x", finite_range(main$x, if (has_fit) fit$x), mult = if (bubbles) c(0.07, 0.07) else c(0.05, 0.05))
   ax_y <- axis_spec(ctx, "y", yr, mult = if (bubbles) c(0.09, 0.09) else c(0.05, 0.05))
-  if (bubbles) ax_x <- axis_spec(ctx, "x", finite_range(main$x, if (has_fit) fit$x), mult = c(0.07, 0.07))
 
   # ---- legend
   fits <- records(comp$fits, c("group", "label"))

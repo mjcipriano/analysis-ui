@@ -47,6 +47,9 @@ class _Worker:
         env = dict(os.environ)
         env["AUI_R_DIR"] = str(R_DIR)
         env["AUI_SHARED_DIR"] = str(SHARED_DIR)
+        # a UTF-8 locale so that µ, ρ, − ... survive in labels and tables
+        if "UTF-8" not in (env.get("LC_ALL") or env.get("LC_CTYPE") or env.get("LANG") or "").upper().replace("UTF8", "UTF-8"):
+            env["LC_ALL"] = "C.UTF-8"
         self.proc = subprocess.Popen(
             [exe, "--vanilla", str(R_DIR / "worker.R")],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

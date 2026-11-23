@@ -410,7 +410,7 @@ kind_violin <- function(ctx, S) {
              data.frame(x = centres[[id]] - hw, xend = centres[[id]] + hw, y = qs, which = c("q", "m", "q"))
            }))
            q <- q[on_scale(ax, q$y), , drop = FALSE]
-           qcol <- if (outline == "match") ctx$ink else ctx$ink
+           qcol <- ctx$ink
            out <- c(out, list(
              geom_segment(aes(x = .data$x, xend = .data$xend, y = .data$y, yend = .data$y), data = q[q$which == "q", ],
                           colour = qcol, linewidth = lw(0.8), linetype = "22", show.legend = FALSE),
