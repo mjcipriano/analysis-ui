@@ -1243,7 +1243,8 @@ def _prep_bland_altman(ctx: Context) -> Prepared:
       main   mean, diff
     computed
       bias, sd, loa_lo, loa_hi, bias_ci [lo, hi], loa_lo_ci [lo, hi], loa_hi_ci [lo, hi], n,
-      percent (bool: differences are % of the mean)
+      percent (bool: differences are % of the mean), ratio (bool: values are ratios A/B,
+      limits back-transformed from logs), ref (the "no difference" value: 0, or 1 for ratios)
     """
     from scipy import stats as st
     a, b = ctx.var("method_a"), ctx.var("method_b")
@@ -1252,7 +1253,13 @@ def _prep_bland_altman(ctx: Context) -> Prepared:
         raise AnalysisError("A Bland–Altman plot needs at least 3 complete pairs.")
     mean = (sub["a"] + sub["b"]) / 2
     pct = ctx.opt("diff_type", "absolute") == "percent"
-    diff = (sub["a"] - sub["b"]) / mean * 100 if pct else sub["a"] - sub["b"]
+    ratio = ctx.opt("diff_type", "absolute") == "ratio"
+    if ratio:
+        if (sub[["a", "b"]] <= 0).any().any():
+            raise AnalysisError("Ratios need positive values in both methods.")
+        diff = np.log(sub["a"] / sub["b"])       # analysed on the log scale, shown back-transformed
+    else:
+        diff = (sub["a"] - sub["b"]) / mean * 100 if pct else sub["a"] - sub["b"]
     ok = np.isfinite(diff)
     mean, diff = mean[ok], diff[ok]
     n = len(diff)
@@ -1260,13 +1267,16 @@ def _prep_bland_altman(ctx: Context) -> Prepared:
     t = st.t.ppf(0.975, n - 1)
     se_b, se_l = sd / math.sqrt(n), sd * math.sqrt(3 / n)
     lo, hi = bias - 1.96 * sd, bias + 1.96 * sd
-    return Prepared(frames={"main": pd.DataFrame({"mean": mean.to_numpy(), "diff": diff.to_numpy()})},
-                    computed={"bias": bias, "sd": sd, "loa_lo": lo, "loa_hi": hi, "n": n, "percent": pct,
-                              "bias_ci": [bias - t * se_b, bias + t * se_b],
-                              "loa_lo_ci": [lo - t * se_l, lo + t * se_l],
-                              "loa_hi_ci": [hi - t * se_l, hi + t * se_l]},
+    f = math.exp if ratio else float
+    return Prepared(frames={"main": pd.DataFrame({"mean": mean.to_numpy(),
+                                                  "diff": np.exp(diff.to_numpy()) if ratio else diff.to_numpy()})},
+                    computed={"bias": f(bias), "sd": sd, "loa_lo": f(lo), "loa_hi": f(hi), "n": n, "percent": pct,
+                              "ratio": ratio, "ref": 1.0 if ratio else 0.0,
+                              "bias_ci": [f(bias - t * se_b), f(bias + t * se_b)],
+                              "loa_lo_ci": [f(lo - t * se_l), f(lo + t * se_l)],
+                              "loa_hi_ci": [f(hi - t * se_l), f(hi + t * se_l)]},
                     color_keys=["Points"], x_label=f"Mean of {a} and {b}",
-                    y_label=f"Difference ({a} − {b})" + (", % of mean" if pct else ""))
+                    y_label=f"Ratio ({a} / {b})" if ratio else f"Difference ({a} − {b})" + (", % of mean" if pct else ""))
 
 
 graph(id="bland_altman", name="Bland–Altman plot", category="Specialized",
@@ -1274,7 +1284,7 @@ graph(id="bland_altman", name="Bland–Altman plot", category="Specialized",
       features={"axes", "x_num", "y_num", "palette"}, prepare=_prep_bland_altman,
       options=[opt.variable("method_a", "Method A", opt.CONTINUOUS, section="Data"),
                opt.variable("method_b", "Method B", opt.CONTINUOUS, section="Data"),
-               opt.choice("diff_type", "Difference", [("absolute", "A − B"), ("percent", "Percent of the mean")],
+               opt.choice("diff_type", "Difference", [("absolute", "A − B"), ("percent", "Percent of the mean"), ("ratio", "Ratio A / B")],
                           default="absolute", section="Data"),
                opt.boolean("show_ci", "Shade 95% CIs of bias and limits", True, section="Appearance"),
                opt.boolean("show_line_labels", "Label the lines with their values", True, section="Appearance"),

@@ -25,7 +25,7 @@ render_bland_altman <- function(ctx) {
   if (show_ci && ax_y$scale == "linear") {
     band(ci$bias, col, 0.14); band(ci$lo, ctx$muted, 0.16); band(ci$hi, ctx$muted, 0.16)
   }
-  if (!length(ctx$hlines) && ax_y$scale == "linear") add(geom_hline(yintercept = 0, colour = ctx$muted, linewidth = lw(0.6)))
+  if (!length(ctx$hlines) && ax_y$scale == "linear") add(geom_hline(yintercept = if (isTRUE(comp$ratio)) 1 else 0, colour = ctx$muted, linewidth = lw(0.6)))
   if (is.finite(bias)) add(geom_hline(yintercept = bias, colour = col, linewidth = lw(line_pt)))
   loa <- c(lo, hi)[is.finite(c(lo, hi))]
   if (length(loa)) add(geom_hline(yintercept = loa, colour = ctx$ink, linewidth = lw(line_pt), linetype = "42"))

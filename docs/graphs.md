@@ -6,73 +6,73 @@
 
 | Graph | What it shows | Type-specific options |
 |---|---|---|
-| **Scatter dot plot** <br>`column_scatter` | Every value as a dot, with a line at the mean or median and error bars. | Arrangement, Spread width, Point size (pt), Point shape, Point opacity, Point color, Show mean/median line & error bars, Show, Error bars, Error bar cap width, Error bar thickness (pt), Mean/median line width, Pairwise test, Comparisons … |
-| **Bar graph** <br>`column_bar` | Bars at the mean or median with error bars; optionally overlay the individual points. | Width, Fill opacity, Outline, Outline thickness (pt), Show, Error bars, Error bar cap width, Error bar thickness (pt), Error bar direction, Show individual points, Arrangement, Spread width, Point size (pt), Point shape … |
-| **Box & whiskers** <br>`box` | Median, quartiles and whiskers; optionally overlay the individual points. | Whiskers, Show outliers, Mark the mean (+), Notched boxes, Width, Fill opacity, Outline, Outline thickness (pt), Show individual points, Arrangement, Spread width, Point size (pt), Point shape, Point opacity … |
-| **Violin plot** <br>`violin` | Distribution shape of every group, with optional box, quartiles and points. | Inside the violin, Violin widths, Trim at the data range, Smoothing, Width, Fill opacity, Outline, Outline thickness (pt), Show individual points, Arrangement, Spread width, Point size (pt), Point shape, Point opacity … |
-| **Raincloud plot** <br>`raincloud` | Half violin, box plot and raw points side by side — the full picture of each group. | Smoothing, Fill opacity, Show box plot, Point size (pt), Point shape, Point opacity, Point color, Pairwise test, Comparisons, Control group, Pairs, Multiple-comparison correction, Label, Hide non-significant |
-| **Before–after (paired)** <br>`before_after` | Paired values joined by a line for each subject. | Line thickness (pt), Line opacity, Line color, Overlay mean & error bars, Show, Error bars, Error bar cap width, Error bar thickness (pt), Point size (pt), Point shape, Point opacity, Point color, Pairwise test, Comparisons … |
+| **Scatter dot plot** <br>`column_scatter` | Every value as a dot, with a line at the mean or median and error bars. | Panels per row, Panel axes, Show panel titles, Arrangement, Spread width, Point size (pt), Point shape, Point opacity, Point color, Show mean/median line & error bars, Show, Error bars, Error bar cap width, Error bar thickness (pt) … |
+| **Bar graph** <br>`column_bar` | Bars at the mean or median with error bars; optionally overlay the individual points. | Panels per row, Panel axes, Show panel titles, Width, Fill opacity, Outline, Outline thickness (pt), Show, Error bars, Error bar cap width, Error bar thickness (pt), Error bar direction, Show individual points, Arrangement … |
+| **Box & whiskers** <br>`box` | Median, quartiles and whiskers; optionally overlay the individual points. | Panels per row, Panel axes, Show panel titles, Whiskers, Show outliers, Mark the mean (+), Notched boxes, Width, Fill opacity, Outline, Outline thickness (pt), Show individual points, Arrangement, Spread width … |
+| **Violin plot** <br>`violin` | Distribution shape of every group, with optional box, quartiles and points. | Panels per row, Panel axes, Show panel titles, Inside the violin, Violin widths, Trim at the data range, Smoothing, Width, Fill opacity, Outline, Outline thickness (pt), Show individual points, Arrangement, Spread width … |
+| **Raincloud plot** <br>`raincloud` | Half violin, box plot and raw points side by side — the full picture of each group. | Panels per row, Panel axes, Show panel titles, Smoothing, Fill opacity, Show box plot, Point size (pt), Point shape, Point opacity, Point color, Pairwise test, Comparisons, Control group, Pairs … |
+| **Before–after (paired)** <br>`before_after` | Paired values joined by a line for each subject. | Panels per row, Panel axes, Show panel titles, Line thickness (pt), Line opacity, Line color, Overlay mean & error bars, Show, Error bars, Error bar cap width, Error bar thickness (pt), Point size (pt), Point shape, Point opacity … |
 
 ## Grouped
 
 | Graph | What it shows | Type-specific options |
 |---|---|---|
-| **Grouped bar graph** <br>`grouped_bar` | Bars for every subgroup, side by side or stacked, with error bars. | Arrangement, Spacing between subgroups, Width, Fill opacity, Outline, Outline thickness (pt), Show, Error bars, Error bar cap width, Error bar thickness (pt), Show individual points, Point size (pt), Point shape, Point opacity … |
-| **Grouped box plot** <br>`grouped_box` | Box & whiskers for every subgroup within each category. | Spacing between subgroups, Whiskers, Show outliers, Width, Fill opacity, Outline, Outline thickness (pt), Show individual points, Point size (pt), Point shape, Point opacity, Point color, Pairwise test, Comparisons … |
-| **Grouped violin plot** <br>`grouped_violin` | Violins for every subgroup within each category. | Spacing between subgroups, Inside the violin, Smoothing, Width, Fill opacity, Outline, Outline thickness (pt), Show individual points, Point size (pt), Point shape, Point opacity, Point color, Pairwise test, Comparisons … |
-| **Grouped scatter** <br>`grouped_points` | Individual points for every subgroup with mean/median line and error bars. | Spacing between subgroups, Point size (pt), Point shape, Point opacity, Point color, Spread width, Show mean/median line & error bars, Show, Error bars, Error bar cap width, Error bar thickness (pt), Pairwise test, Comparisons, Control group … |
-| **Interaction (means) plot** <br>`interaction_line` | Group means joined by lines across categories — the classic two-way ANOVA plot. | Horizontal offset between lines, Line thickness (pt), Show, Error bars, Error bar cap width, Error bar thickness (pt), Show individual points, Point size (pt), Point shape, Point opacity, Point color |
+| **Grouped bar graph** <br>`grouped_bar` | Bars for every subgroup, side by side or stacked, with error bars. | Panels per row, Panel axes, Show panel titles, Arrangement, Spacing between subgroups, Width, Fill opacity, Outline, Outline thickness (pt), Show, Error bars, Error bar cap width, Error bar thickness (pt), Show individual points … |
+| **Grouped box plot** <br>`grouped_box` | Box & whiskers for every subgroup within each category. | Panels per row, Panel axes, Show panel titles, Spacing between subgroups, Whiskers, Show outliers, Width, Fill opacity, Outline, Outline thickness (pt), Show individual points, Point size (pt), Point shape, Point opacity … |
+| **Grouped violin plot** <br>`grouped_violin` | Violins for every subgroup within each category. | Panels per row, Panel axes, Show panel titles, Spacing between subgroups, Inside the violin, Smoothing, Width, Fill opacity, Outline, Outline thickness (pt), Show individual points, Point size (pt), Point shape, Point opacity … |
+| **Grouped scatter** <br>`grouped_points` | Individual points for every subgroup with mean/median line and error bars. | Panels per row, Panel axes, Show panel titles, Spacing between subgroups, Point size (pt), Point shape, Point opacity, Point color, Spread width, Show mean/median line & error bars, Show, Error bars, Error bar cap width, Error bar thickness (pt) … |
+| **Interaction (means) plot** <br>`interaction_line` | Group means joined by lines across categories — the classic two-way ANOVA plot. | Panels per row, Panel axes, Show panel titles, Horizontal offset between lines, Line thickness (pt), Show, Error bars, Error bar cap width, Error bar thickness (pt), Show individual points, Point size (pt), Point shape, Point opacity, Point color … |
 
 ## XY
 
 | Graph | What it shows | Type-specific options |
 |---|---|---|
-| **XY scatter** <br>`xy` | Points for X–Y data, with optional lines, error bars and fitted curves. | Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt), Line style, Largest bubble (pt), Fit a curve … |
-| **Line graph** <br>`xy_line` | Points joined by lines. Replicates at the same X are averaged with error bars. | Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt), Line style, Largest bubble (pt), Fit a curve … |
-| **Scatter with regression line** <br>`xy_regression` | Scatter plot with a fitted straight line and its 95% confidence band. | Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt), Line style, Largest bubble (pt), Fit a curve … |
-| **Dose–response curve** <br>`dose_response` | Log-concentration axis with a fitted 4-parameter logistic curve. | Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt), Line style, Largest bubble (pt), Fit a curve … |
-| **Bubble chart** <br>`bubble` | Scatter plot where a third variable sets the size of each point. | Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt), Line style, Largest bubble (pt), Fit a curve … |
+| **XY scatter** <br>`xy` | Points for X–Y data, with optional lines, error bars and fitted curves. | Panels per row, Panel axes, Show panel titles, Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt) … |
+| **Line graph** <br>`xy_line` | Points joined by lines. Replicates at the same X are averaged with error bars. | Panels per row, Panel axes, Show panel titles, Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt) … |
+| **Scatter with regression line** <br>`xy_regression` | Scatter plot with a fitted straight line and its 95% confidence band. | Panels per row, Panel axes, Show panel titles, Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt) … |
+| **Dose–response curve** <br>`dose_response` | Log-concentration axis with a fitted 4-parameter logistic curve. | Panels per row, Panel axes, Show panel titles, Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt) … |
+| **Bubble chart** <br>`bubble` | Scatter plot where a third variable sets the size of each point. | Panels per row, Panel axes, Show panel titles, Replicates at the same X, Summary, Error bars, Error style, Error bar cap width (pt), Show points, Point size (pt), Point shape, Point opacity, Connect points, Line thickness (pt) … |
 
 ## Distribution
 
 | Graph | What it shows | Type-specific options |
 |---|---|---|
-| **Histogram** <br>`histogram` | Frequency distribution, with optional density and normal curves. | Number of bins, Y axis shows, Several groups, Fill opacity, Outline, Overlay density curve, Overlay normal curve, Density smoothing, Curve thickness (pt), Rug marks |
-| **Density plot** <br>`density` | Smooth kernel density curves, overlaid or as a ridgeline plot. | Style, Smoothing, Fill opacity, Line thickness (pt), Ridgeline overlap, Rug marks |
-| **Ridgeline plot** <br>`ridgeline` | One density curve per group, stacked in overlapping rows. | Style, Smoothing, Fill opacity, Line thickness (pt), Ridgeline overlap, Rug marks |
-| **Normal QQ plot** <br>`qq` | Compare the distribution of the data with a normal distribution. | Point size (pt), Point shape, Point opacity, Show reference line, Line thickness (pt) |
-| **Cumulative distribution** <br>`ecdf` | Empirical cumulative frequency distribution of each group. | Y axis shows, Line thickness (pt) |
+| **Histogram** <br>`histogram` | Frequency distribution, with optional density and normal curves. | Number of bins, Y axis shows, Several groups, Fill opacity, Outline, Overlay density curve, Overlay normal curve, Density smoothing, Curve thickness (pt), Rug marks, Text and arrows |
+| **Density plot** <br>`density` | Smooth kernel density curves, overlaid or as a ridgeline plot. | Panels per row, Panel axes, Show panel titles, Style, Smoothing, Fill opacity, Line thickness (pt), Ridgeline overlap, Rug marks, Text and arrows |
+| **Ridgeline plot** <br>`ridgeline` | One density curve per group, stacked in overlapping rows. | Panels per row, Panel axes, Show panel titles, Style, Smoothing, Fill opacity, Line thickness (pt), Ridgeline overlap, Rug marks, Text and arrows |
+| **Normal QQ plot** <br>`qq` | Compare the distribution of the data with a normal distribution. | Panels per row, Panel axes, Show panel titles, Point size (pt), Point shape, Point opacity, Show reference line, Line thickness (pt), Text and arrows |
+| **Cumulative distribution** <br>`ecdf` | Empirical cumulative frequency distribution of each group. | Panels per row, Panel axes, Show panel titles, Y axis shows, Line thickness (pt), Text and arrows |
 
 ## Survival
 
 | Graph | What it shows | Type-specific options |
 |---|---|---|
-| **Kaplan–Meier survival curve** <br>`survival` | Survival curves with censoring marks, confidence bands and a numbers-at-risk table. | Show as percent, Plot cumulative incidence (1 − survival), Line thickness (pt), 95% confidence band, Mark censored subjects, Mark median survival, Show log-rank P value, Numbers-at-risk table |
+| **Kaplan–Meier survival curve** <br>`survival` | Survival curves with censoring marks, confidence bands and a numbers-at-risk table. | Show as percent, Plot cumulative incidence (1 − survival), Line thickness (pt), 95% confidence band, Mark censored subjects, Mark median survival, Show log-rank P value, Numbers-at-risk table, Text and arrows |
 
 ## Parts of whole
 
 | Graph | What it shows | Type-specific options |
 |---|---|---|
-| **Pie chart** <br>`pie` | Fractions of a whole as slices. | Slice order, Hole size (donut), Slice labels, Label position, Start angle (°), Gap between slices (pt) |
-| **Donut chart** <br>`donut` | A pie chart with a hole in the middle. | Slice order, Hole size (donut), Slice labels, Label position, Start angle (°), Gap between slices (pt) |
-| **Frequency bar chart** <br>`count_bar` | Counts or percentages of categories; stack or split by a second variable. | Arrangement, Bar height, Labels on bars, Width, Fill opacity, Outline, Outline thickness (pt) |
+| **Pie chart** <br>`pie` | Fractions of a whole as slices. | Slice order, Hole size (donut), Slice labels, Label position, Start angle (°), Gap between slices (pt), Text and arrows |
+| **Donut chart** <br>`donut` | A pie chart with a hole in the middle. | Slice order, Hole size (donut), Slice labels, Label position, Start angle (°), Gap between slices (pt), Text and arrows |
+| **Frequency bar chart** <br>`count_bar` | Counts or percentages of categories; stack or split by a second variable. | Arrangement, Bar height, Labels on bars, Width, Fill opacity, Outline, Outline thickness (pt), Text and arrows |
 
 ## Matrix
 
 | Graph | What it shows | Type-specific options |
 |---|---|---|
-| **Heat map** <br>`heatmap` | A color-coded table of values, with optional clustering and z-scores. | Center the color scale on zero, Color scale minimum, Color scale maximum, Show values in cells, Decimals, Value text size (pt), Cell borders, Square cells, Show color scale |
-| **Correlation matrix** <br>`corr_matrix` | Heat map of the correlations between every pair of variables. | Mark significant correlations with stars, Show values in cells, Decimals, Value text size (pt), Cell borders, Square cells, Show color scale |
+| **Heat map** <br>`heatmap` | A color-coded table of values, with optional clustering and z-scores. | Center the color scale on zero, Color scale minimum, Color scale maximum, Show values in cells, Decimals, Value text size (pt), Cell borders, Square cells, Show color scale, Text and arrows |
+| **Correlation matrix** <br>`corr_matrix` | Heat map of the correlations between every pair of variables. | Mark significant correlations with stars, Show values in cells, Decimals, Value text size (pt), Cell borders, Square cells, Show color scale, Text and arrows |
 
 ## Specialized
 
 | Graph | What it shows | Type-specific options |
 |---|---|---|
-| **Bland–Altman plot** <br>`bland_altman` | Agreement between two measurement methods: difference against mean with limits of agreement. | Shade 95% CIs of bias and limits, Label the lines with their values, Point size (pt), Point shape, Point opacity, Line thickness (pt) |
-| **ROC curve** <br>`roc` | Sensitivity against 1 − specificity for one or more diagnostic markers. | Axes in percent, Show AUC in the legend, Show line of identity, Shade the area under the curve, Line thickness (pt) |
-| **Volcano plot** <br>`volcano` | Effect size against significance for many comparisons (e.g. differential expression). | Effect cut-off (±), P value cut-off, Draw cut-off lines, Label the top N hits, Point size (pt), Point opacity, Label text size (pt) |
-| **Forest plot** <br>`forest` | Estimates with confidence intervals, one row each — for odds ratios, hazard ratios, effect sizes. | Reference line at, Print estimates beside the graph, Decimals, Marker size (pt), Marker shape, Line thickness (pt), Cap size (pt) |
-| **Waterfall plot** <br>`waterfall` | One bar per subject, sorted by value — e.g. best change in tumor size. | Show labels on the X axis, Width, Fill opacity, Outline, Outline thickness (pt) |
+| **Bland–Altman plot** <br>`bland_altman` | Agreement between two measurement methods: difference against mean with limits of agreement. | Shade 95% CIs of bias and limits, Label the lines with their values, Point size (pt), Point shape, Point opacity, Line thickness (pt), Text and arrows |
+| **ROC curve** <br>`roc` | Sensitivity against 1 − specificity for one or more diagnostic markers. | Axes in percent, Show AUC in the legend, Show line of identity, Shade the area under the curve, Line thickness (pt), Text and arrows |
+| **Volcano plot** <br>`volcano` | Effect size against significance for many comparisons (e.g. differential expression). | Effect cut-off (±), P value cut-off, Draw cut-off lines, Label the top N hits, Point size (pt), Point opacity, Label text size (pt), Text and arrows |
+| **Forest plot** <br>`forest` | Estimates with confidence intervals, one row each — for odds ratios, hazard ratios, effect sizes. | Reference line at, Print estimates beside the graph, Decimals, Marker size (pt), Marker shape, Line thickness (pt), Cap size (pt), Text and arrows |
+| **Waterfall plot** <br>`waterfall` | One bar per subject, sorted by value — e.g. best change in tumor size. | Show labels on the X axis, Width, Fill opacity, Outline, Outline thickness (pt), Text and arrows |
 
 ## Look-and-feel options shared by every graph
 
@@ -81,6 +81,7 @@
 * **Axes** — X minimum, X maximum, X scale, X tick interval, Y minimum, Y maximum, Y scale, Y tick interval, X tick label angle, Grid lines, Frame, Axis line thickness (pt), Tick marks, Horizontal (swap X and Y), Horizontal reference lines, Vertical reference lines
 * **Legend** — Legend position
 * **Fonts** — Font, Base font size (pt), Title size (pt), Axis title size (pt), Tick label size (pt), Legend text size (pt)
+* **Annotations** — Text and arrows
 * **Size** — Width (inches), Height (inches)
 
 Themes: Publication, Classic, Minimal, Boxed (black & white), Gray panel (ggplot), Soft grid, Press, Slate, Dark, Poster (bold & large).

@@ -368,7 +368,7 @@ def bland_altman(ctx: Context) -> Results:
                        "ratio": f"{a_name} / {b_name}"}[kind])
         r.plot("Bland–Altman plot", fig)
     r.graph("Create a Bland–Altman graph", "bland_altman",
-            {"method_a": a_name, "method_b": b_name, "diff_type": "percent" if kind == "percent" else "absolute"})
+            {"method_a": a_name, "method_b": b_name, "diff_type": kind if kind in ("percent", "ratio") else "absolute"})
     return r
 
 

@@ -40,7 +40,9 @@ results that update live as you change options or data.
   and layouts, significance brackets, reference lines, legend, size. Double-
   click the title, an axis or the data to jump to its settings; copy a
   graph's style and paste it onto another. Export PNG / TIFF / JPEG up to
-  1200 dpi, or vector PDF / SVG with editable text.
+  1200 dpi, or vector PDF / SVG with editable text. Split any column, grouped
+  or XY graph into panels by a variable; add text and arrows by clicking and
+  dragging on the graph; combine graphs into multi-panel figures (A, B, C …).
   → [full list](docs/graphs.md)
 * **Projects** — everything (tables, analyses, graphs) is kept in one project
   file (`.aui.json`); the session is also auto-saved in the browser.
@@ -129,8 +131,8 @@ Settings (environment variables): `AUI_RSCRIPT` (path to Rscript),
 * Statistical results are validated in the test-suite against reference
   implementations (R, scipy, statsmodels, lifelines), but this is young
   software — check critical results independently.
-* Not yet available: faceted (multi-panel) graphs, free-form annotations
-  drawn on graphs, and multi-graph page layouts.
+* Where a method differs from GraphPad Prism's default, the table footnote names
+  the method that was used.
 
 ## License
 
