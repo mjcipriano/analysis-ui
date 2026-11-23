@@ -115,8 +115,9 @@ render_density <- function(ctx) {
     P <- xy_panel(ctx, ax_y, legend, keys)
     base <- if (ax_y$is_log) ax_y$lim[1] else 0
     dens <- dens[on_scale(ax_y, dens$y) | !ax_y$is_log, , drop = FALSE]
+    dens$base <- rep(base, nrow(dens))
     layers <- list(
-      geom_ribbon(aes(x = .data$x, ymin = base, ymax = .data$y, fill = .data$key, group = .data$key), data = dens,
+      geom_ribbon(aes(x = .data$x, ymin = .data$base, ymax = .data$y, fill = .data$key, group = .data$key), data = dens,
                   alpha = alpha, colour = NA, show.legend = TRUE),
       geom_line(aes(x = .data$x, y = .data$y, colour = .data$key, group = .data$key), data = dens,
                 linewidth = lw(line_pt), show.legend = FALSE))
@@ -152,8 +153,9 @@ render_density <- function(ctx) {
   if (has_rows(rug)) {
     rug$base <- k - as.integer(rug$group)
     tick <- 5 / P$h * diff(ylim)
-    layers <- c(layers, list(geom_segment(aes(x = .data$value, xend = .data$value, y = .data$base - tick * 0.25,
-                                              yend = .data$base - tick * 1.25, colour = .data$key), data = rug,
+    rug$y0 <- rug$base - tick * 0.25; rug$y1 <- rug$base - tick * 1.25
+    layers <- c(layers, list(geom_segment(aes(x = .data$value, xend = .data$value, y = .data$y0,
+                                              yend = .data$y1, colour = .data$key), data = rug,
                                           alpha = 0.7, linewidth = lw(0.6), show.legend = FALSE)))
   }
   xy_assemble(ctx, ax_x, ax_y, layers, legend, keys, dark = FALSE,

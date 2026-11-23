@@ -123,16 +123,27 @@ group_cols <- function(ctx, keys) {
 }
 
 # ---- text measurement (points) ---------------------------------------------
+TEXT_W_CACHE <- new.env()            # width at 100 pt, keyed by family / face / string
 text_w <- function(ctx, strings, size, bold = FALSE) {
   strings <- as.character(strings)
   if (!length(strings)) return(numeric(0))
-  lines <- strsplit(strings, "\n", fixed = TRUE)
-  flat <- unlist(lapply(lines, function(l) if (length(l)) l else ""))
-  w <- tryCatch(
-    systemfonts::string_width(flat, family = ctx$f$family, bold = bold, size = size, res = 72),
-    error = function(e) nchar(flat) * size * 0.55)
-  idx <- rep(seq_along(lines), pmax(lengths(lines), 1L))
-  as.numeric(tapply(w, idx, max))
+  strings[is.na(strings)] <- ""
+  keys <- paste(ctx$f$family, bold, strings, sep = "\r")
+  hit <- mget(keys, envir = TEXT_W_CACHE, ifnotfound = list(NULL))
+  miss <- which(vapply(hit, is.null, logical(1)) & !duplicated(keys))
+  if (length(miss)) {
+    if (length(TEXT_W_CACHE) > 20000) rm(list = ls(TEXT_W_CACHE), envir = TEXT_W_CACHE)
+    lines <- strsplit(strings[miss], "\n", fixed = TRUE)
+    flat <- unlist(lapply(lines, function(l) if (length(l)) l else ""))
+    w <- tryCatch(
+      systemfonts::string_width(flat, family = ctx$f$family, bold = bold, size = 100, res = 72),
+      error = function(e) nchar(flat) * 55)
+    idx <- rep(seq_along(lines), pmax(lengths(lines), 1L))
+    w <- as.numeric(tapply(w, idx, max))
+    for (k in seq_along(miss)) assign(keys[miss[k]], w[k], envir = TEXT_W_CACHE)
+    hit <- mget(keys, envir = TEXT_W_CACHE, ifnotfound = list(0))
+  }
+  as.numeric(unlist(hit, use.names = FALSE)) * size / 100
 }
 max_text_w <- function(ctx, strings, size, bold = FALSE) {
   w <- text_w(ctx, strings, size, bold)
@@ -242,14 +253,22 @@ axis_breaks <- function(ctx, ax, minor_ok = TRUE) {
     k <- seq(ceiling(ax$tlim[1] - 1e-9), floor(ax$tlim[2] + 1e-9))
     if (length(k) >= 2 && k[1] <= k[length(k)]) {
       every <- ceiling(length(k) / 8)
-      kk <- k[k %% every == 0]
-      if (length(kk) < 2) kk <- k
+      repeat {                                           # fewer labelled decades on a short axis
+        kk <- k[k %% every == 0]
+        if (length(kk) < 2) { kk <- if (every > 1) k[c(1, length(k))] else k; break }
+        if (is.null(ax$len_pt)) break
+        labs_try <- if (min(kk) < -4 || max(kk) > 5) sprintf("10%d", kk) else fmt_each(10^kk)
+        need <- if (isTRUE(ax$horizontal)) sum(text_w(ctx, labs_try, ctx$f$tick)) + length(kk) * ctx$f$tick * 0.8
+                else length(kk) * ctx$f$tick * 1.25
+        if (need <= ax$len_pt || every >= length(k)) break
+        every <- every + 1
+      }
       major <- 10^kk
       wide <- min(kk) < -4 || max(kk) > 5
       labs <- if (wide) parse(text = sprintf("10^%d", kk)) else fmt_each(major)
-      if (minor_ok && every == 1 && length(k) <= 6) {
+      if (minor_ok && length(k) <= 6) {                  # unlabelled ticks: 2..9 x 10^n and skipped decades
         kmin <- seq(min(k) - 1, max(k))
-        minor <- inside(setdiff(as.vector(outer(2:9, 10^kmin)), major))
+        minor <- inside(setdiff(c(as.vector(outer(2:9, 10^kmin)), 10^k), major))
         if (length(minor)) {
           br <- c(major, minor)
           lb <- if (wide) parse(text = c(sprintf("10^%d", kk), rep('""', length(minor))))
@@ -282,11 +301,17 @@ axis_breaks <- function(ctx, ax, minor_ok = TRUE) {
   if (is.null(br)) {
     # fewer ticks when the labels would not fit along the axis (ax$len_pt, when known)
     for (n in c(5, 4, 3, 2)) {
-      br <- inside(scales::extended_breaks(n = n)(lim))
+      cand <- inside(scales::extended_breaks(n = n)(lim))
+      if (n < 5 && length(cand) < 2) break               # never fewer than two ticks
+      br <- cand
       if (is.null(ax$len_pt) || length(br) <= 2) break
       need <- if (isTRUE(ax$horizontal)) sum(text_w(ctx, fmt_num(br), ctx$f$tick)) + length(br) * ctx$f$tick * 0.9
               else length(br) * ctx$f$tick * 1.25
       if (need <= ax$len_pt) break
+    }
+    if (length(br) < 2) {                                # a very short axis: label its ends at least roughly
+      cand <- inside(scales::extended_breaks(n = 3, Q = c(1, 5, 2, 2.5, 4, 3, 1.5, 6, 8))(lim))
+      if (length(cand) >= 2) br <- cand[c(1, length(cand))]
     }
   } else br <- inside(br)
   list(breaks = br, labels = fmt_num(br))
@@ -909,11 +934,26 @@ facet_layout <- function(ctx, levels, free_x_ok = TRUE) {
   free_h <- if (ctx$flip) free_y else free_x           # ... and as seen on the page
   free_v <- if (ctx$flip) free_x else free_y
   labels <- opt_flag(comp, "facet_labels", TRUE)
-  lines <- max(1, lengths(strsplit(levels, "\n", fixed = TRUE)))
-  list(levels = levels, n = n, ncol = ncol, nrow = nrow, free_x = free_x, free_y = free_y,
+  # long panel titles are wrapped to the (approximate) panel width
+  room <- max((ctx$W * 72 - 60) / ncol - 12, 30)
+  titles <- vapply(levels, function(l) wrap_text(ctx, l, room, ctx$f$tick, bold = TRUE), character(1))
+  lines <- max(1, lengths(strsplit(titles, "\n", fixed = TRUE)))
+  list(levels = levels, titles = titles, n = n, ncol = ncol, nrow = nrow, free_x = free_x, free_y = free_y,
        free_h = free_h, free_v = free_v, labels = labels,
        scales = if (free_h && free_v) "free" else if (free_h) "free_x" else if (free_v) "free_y" else "fixed",
        spacing = max(8, ctx$f$base * 0.9), strip = if (labels) ctx$f$tick * 1.2 * lines + 6 else 0)
+}
+
+# greedy word wrap of one label to `width` points
+wrap_text <- function(ctx, label, width, size, bold = FALSE) {
+  if (text_w(ctx, label, size, bold) <= width) return(label)
+  words <- strsplit(label, " ", fixed = TRUE)[[1]]
+  lines <- character(0); cur <- ""
+  for (w in words) {
+    try_line <- if (nzchar(cur)) paste(cur, w) else w
+    if (nzchar(cur) && text_w(ctx, try_line, size, bold) > width) { lines <- c(lines, cur); cur <- w } else cur <- try_line
+  }
+  paste(c(lines, cur), collapse = "\n")
 }
 
 # the context of one panel: frames, brackets and fits restricted to that facet
@@ -949,16 +989,16 @@ tag_layers <- function(layers, level, levels) {
 # aesthetics given per row (e.g. text colours) are concatenated with the data.
 merge_layers <- function(layers) {
   if (length(layers) < 2) return(layers)
+  flat <- function(x) paste(names(x), vapply(x, function(v) {
+    if (is.atomic(v) && length(v) <= 4) paste(format(v), collapse = ",") else paste0("<", class(v)[1], length(v), ">")
+  }, ""), collapse = ";")
   signature <- function(l) {
     n <- if (is.data.frame(l$data)) nrow(l$data) else -1L
     per_row <- vapply(l$aes_params, function(v) length(v) > 1 && length(v) == n, logical(1))
-    const <- l$aes_params[!per_row]
-    paste(class(l$geom)[1], class(l$stat)[1], class(l$position)[1],
-          paste(names(l$mapping), vapply(l$mapping, function(m) paste(deparse(m), collapse = ""), ""), collapse = ";"),
-          paste(names(const), vapply(const, function(v) paste(format(v), collapse = ","), ""), collapse = ";"),
-          paste(sort(names(l$aes_params)[per_row]), collapse = ","),
-          paste(deparse(l$geom_params[setdiff(names(l$geom_params), "na.rm")]), collapse = ""),
-          paste(deparse(l$stat_params), collapse = ""), paste(deparse(l$show.legend), collapse = ""),
+    paste(class(l$geom)[1], class(l$stat)[1],
+          paste(names(l$mapping), vapply(l$mapping, rlang::as_label, ""), collapse = ";"),
+          flat(l$aes_params[!per_row]), paste(sort(names(l$aes_params)[per_row]), collapse = ","),
+          flat(l$geom_params), flat(l$stat_params), paste(format(l$show.legend), collapse = ","),
           if (is.data.frame(l$data)) paste(names(l$data), collapse = ",") else "nodata", sep = "|")
   }
   sig <- vapply(layers, signature, character(1))
@@ -1026,7 +1066,8 @@ facet_limits <- function(axes, which, levels) {
 # facet_wrap + the pieces every faceted graph needs
 facet_layers <- function(ctx) {
   Fc <- ctx$facet
-  out <- list(facet_wrap(~facet, ncol = Fc$ncol, scales = Fc$scales, drop = FALSE))
+  out <- list(facet_wrap(~facet, ncol = Fc$ncol, scales = Fc$scales, drop = FALSE,
+                         labeller = as_labeller(stats::setNames(Fc$titles, Fc$levels))))
   if (ctx$th$frame == "L" && ctx$th$axis_width > 0) {
     # ggplot draws shared axes on the outer panels only: give every panel its left and bottom line
     out <- c(out, list(annotation_custom(grid::polylineGrob(
@@ -1038,7 +1079,9 @@ facet_layers <- function(ctx) {
 
 # Run `builder` (an ordinary renderer) per panel and combine the panels.
 #   finish(ctx, parts)  builds the plot from merged parts (parts$panels = per-panel parts)
-with_facets <- function(ctx, builder, finish, free_x_ok = TRUE) {
+#   free_x_ok = FALSE   the x axis is categorical: always shared, nothing to resolve
+#   stages              checkpoints at which shared axes are collected (see axes_ready)
+with_facets <- function(ctx, builder, finish, free_x_ok = TRUE, stages = "any") {
   levels <- chr_vec(ctx$computed$facets)
   has_col <- any(vapply(ctx$frames, function(df) is.data.frame(df) && !is.null(df$facet), logical(1)))
   if (!length(levels) || !has_col) return(builder(ctx))
@@ -1051,10 +1094,11 @@ with_facets <- function(ctx, builder, finish, free_x_ok = TRUE) {
   })
   got <- function(res, which) lapply(res, function(r) if (inherits(r, "aui_axes")) r[[which]] else NULL)
   fixed <- list()
-  if (!Fc$free_x || !Fc$free_y) {
-    for (stage in c("base", "final")) {                # "final" lets brackets raise the shared top
+  share_x <- !Fc$free_x && free_x_ok
+  if (share_x || !Fc$free_y) {
+    for (stage in stages) {                            # a second "final" stage lets brackets raise the shared top
       res <- axes_pass(stage, fixed)
-      if (!Fc$free_x) fixed$x <- union_axes(got(res, "x")) %||% fixed$x
+      if (share_x) fixed$x <- union_axes(got(res, "x")) %||% fixed$x
       if (!Fc$free_y) fixed$y <- union_axes(got(res, "y")) %||% fixed$y
     }
   }

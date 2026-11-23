@@ -354,3 +354,138 @@ def test_worker_survives_errors_and_keeps_rendering():
                                  "editable_text": False, "file": "/nonexistent-dir/x.svg"})
     data, options = BASE["pie"]
     assert_svg(render("pie", data, options), 5.0, 4.0)
+
+
+# ------------------------------------------------------------------- facets
+def _facet_data(n_panels: int = 2, long_names: bool = False) -> dict:
+    rng = np.random.default_rng(11)
+    per = 18
+    panel = np.repeat(np.arange(n_panels), per)
+    names = [f"Panel {i + 1}" + (" with quite a long descriptive name" if long_names and i == 1 else "") for i in panel]
+    return {"columns": [
+        {"name": "v", "type": "continuous", "values": list(map(float, rng.normal(20, 4, len(panel)) + panel * 5))},
+        {"name": "w", "type": "continuous", "values": list(map(float, rng.normal(22, 4, len(panel)) + panel * 5))},
+        {"name": "x", "type": "continuous", "values": list(map(float, rng.uniform(1, 100, len(panel))))},
+        {"name": "g", "type": "nominal", "values": (["A", "B", "C"] * (len(panel) // 3 + 1))[:len(panel)]},
+        {"name": "h", "type": "nominal", "values": (["u"] * 9 + ["t"] * 9) * n_panels},
+        {"name": "f", "type": "nominal", "values": names}]}
+
+
+COLUMN_FACET = {"layout": "long", "dep": "v", "group": "g", "facet": "f"}
+GROUPED_FACET = {"layout": "long", "dep": "v", "x": "g", "group": "h", "facet": "f"}
+XY_FACET = {"x": "x", "y": ["v"], "group": "g", "facet": "f"}
+FACET_SPECS = {
+    **{gid: COLUMN_FACET for gid in ("column_scatter", "column_bar", "box", "violin", "raincloud", "density",
+                                     "ridgeline", "ecdf", "qq")},
+    "before_after": {"layout": "wide", "columns": ["v", "w"], "facet": "f"},
+    **{gid: GROUPED_FACET for gid in ("grouped_bar", "grouped_box", "grouped_violin", "grouped_points",
+                                      "interaction_line")},
+    **{gid: XY_FACET for gid in ("xy", "xy_line", "xy_regression", "bubble")},
+}
+FACET_VARIANTS = {
+    "default": {},
+    "free_y": {"facet_axes": "free_y", "legend_position": "bottom"},
+    "free": {"facet_axes": "free", "facet_labels": False, "theme": "dark"},
+    "flip": {"flip": True},
+    "flip_free": {"flip": True, "facet_axes": "free_y", "facet_cols": 1},
+    "stats": {"stat_test": "welch", "show_points": True, "fit": "linear", "y_scale": "log10", "hlines": "20"},
+    "limits": {"y_min": 5, "y_max": 60, "facet_axes": "free", "x_tick_angle": "45", "title": "T", "caption": "c"},
+}
+
+
+def _facet_options(gid: str, extra: dict) -> dict:
+    known = {o["name"] for o in GRAPHS[gid].options}
+    return {**FACET_SPECS[gid], **{k: v for k, v in extra.items() if k in known}}
+
+
+def test_facets_are_offered_for_every_documented_type():
+    for gid in FACET_SPECS:
+        assert "facet" in {o["name"] for o in GRAPHS[gid].options}, gid
+
+
+@pytest.mark.parametrize("variant", sorted(FACET_VARIANTS))
+@pytest.mark.parametrize("gid", sorted(FACET_SPECS))
+def test_facets(gid, variant):
+    data = _facet_data(2)
+    options = {**_facet_options(gid, FACET_VARIANTS[variant]), "width": 4.5, "height": 3.2}
+    svg = render(gid, data, options)
+    assert_svg(svg, 4.5, 3.2)
+
+
+@pytest.mark.parametrize("gid", ["column_bar", "box", "grouped_bar", "xy", "density", "interaction_line"])
+def test_facets_many_panels_and_long_names(gid):
+    data = _facet_data(7, long_names=True)
+    for extra in ({"stat_test": "welch", "fit": "linear"}, {"facet_axes": "free", "facet_cols": 2, "flip": True}):
+        svg = render(gid, data, {**_facet_options(gid, extra), "width": 6, "height": 4.5})
+        assert_svg(svg, 6, 4.5)
+
+
+def test_single_facet_and_png_size():
+    from PIL import Image
+    data = _facet_data(1)
+    for gid in ("column_scatter", "xy", "ecdf"):
+        assert_svg(render(gid, data, _facet_options(gid, {"stat_test": "welch"})), 5.0, 4.0)
+    img = render("box", _facet_data(3), {**COLUMN_FACET, "width": 4, "height": 3}, fmt="png", dpi=100)
+    assert Image.open(io.BytesIO(img)).size == (400, 300)
+
+
+def test_facet_panels_show_strip_titles_and_per_panel_fit_text():
+    data = _facet_data(2)
+    options = {**XY_FACET, "fit": "linear", "group": None, "width": 7, "height": 3.5}
+    text = render("xy", data, options, editable_text=True).decode()
+    assert "Panel 1" in text and "Panel 2" in text
+    assert text.count("R²") == 2                       # one equation inside each panel
+    hidden = render("xy", data, {**options, "facet_labels": False}, editable_text=True).decode()
+    assert "Panel 1" not in hidden
+
+
+def test_facet_options_without_facet_variable_change_nothing():
+    data, options = BASE["column_bar"]
+    plain = render("column_bar", data, options)
+    same = render("column_bar", data, {**options, "facet_cols": 3, "facet_axes": "free", "facet_labels": False})
+    assert plain == same
+
+
+# -------------------------------------------------------------- annotations
+ANNOTATIONS = [
+    {"kind": "text", "x": 0.25, "y": 0.2, "text": "Annotated µ", "bold": True, "italic": True, "angle": 30,
+     "size": 13, "color": "#CC0000", "align": "left"},
+    {"kind": "text", "x": 0.9, "y": 0.9, "text": "plain", "align": "right"},
+    {"kind": "arrow", "x": 0.3, "y": 0.25, "x2": 0.5, "y2": 0.5, "width": 2.5, "color": "#0055AA"},
+    {"kind": "line", "x": 0.1, "y": 0.95, "x2": 0.9, "y2": 0.95},
+]
+
+
+@pytest.mark.parametrize("gid", ["column_bar", "xy", "pie", "heatmap", "survival", "forest", "column_bar-facet"])
+def test_annotations(gid):
+    if gid.endswith("-facet"):
+        gid, data, options = "column_bar", sample("two_way"), {"layout": "long", "dep": "Response", "group": "Treatment",
+                                                                "facet": "Sex"}
+    else:
+        data, options = BASE[gid]
+    plain = render(gid, data, options)
+    svg = render(gid, data, {**options, "annotations": ANNOTATIONS})
+    assert_svg(svg, 5.0, 4.0)
+    assert len(svg) > len(plain)                       # drawn on top, nothing replaced
+    text = render(gid, data, {**options, "annotations": ANNOTATIONS}, editable_text=True).decode()
+    assert "Annotated µ" in text and "plain" in text
+    for fmt in ("png", "pdf"):
+        assert len(render(gid, data, {**options, "annotations": ANNOTATIONS}, fmt=fmt, dpi=72)) > 1000
+
+
+def test_annotation_position_is_in_figure_fractions_from_top_left():
+    data, options = BASE["xy"]
+    notes = [{"kind": "text", "x": 0.25, "y": 0.1, "text": "HERE", "align": "left", "size": 10}]
+    text = render("xy", data, {**options, "annotations": notes, "width": 6, "height": 4}, editable_text=True).decode()
+    m = re.search(r"<text x='([\d.]+)' y='([\d.]+)'[^>]*>HERE</text>", text)
+    assert m, "annotation text not found"
+    assert float(m.group(1)) == pytest.approx(0.25 * 6 * 72, abs=1.0)
+    assert float(m.group(2)) == pytest.approx(0.1 * 4 * 72, abs=6.0)       # baseline of vertically centred text
+
+
+def test_annotations_do_not_change_the_layout():
+    """The plot underneath is identical with and without annotations."""
+    data, options = BASE["column_scatter"]
+    plain = render("column_scatter", data, options).decode()
+    noted = render("column_scatter", data, {**options, "annotations": [ANNOTATIONS[3]]}).decode()
+    assert noted.startswith(plain[:plain.rindex("</g>")][:len(plain) // 2])

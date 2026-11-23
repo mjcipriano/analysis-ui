@@ -72,13 +72,20 @@ render_xy <- function(ctx) {
   fits <- fits[!is.na(fits$label) & fits$group %in% keys, , drop = FALSE]
   panel_fit_text <- !is.null(ctx$facet) && has_fit && opt_flag(o, "fit_legend", TRUE) && nrow(fits) > 0
   fit_pt <- ctx$f$tick * 0.85
-  fit_room <- if (panel_fit_text) nrow(fits) * fit_pt * 1.25 / max(panel_size(ctx)$h, 30) else 0
+  fit_room <- 0
+  if (panel_fit_text) {                                # shrink to the panel; leave the text out when it cannot fit
+    P0 <- panel_size(ctx, legend = legend_position(ctx, if (length(keys) > 1) "right" else "none"),
+                     legend_labels = keys, key_w = 2.2)
+    fit_pt <- max(min(fit_pt, fit_pt * (P0$w - 10) / max_text_w(ctx, fits$label, fit_pt)), 5.5)
+    fit_room <- nrow(fits) * fit_pt * 1.25 / P0$h
+    if (fit_room > 0.4 || max_text_w(ctx, fits$label, fit_pt) > P0$w) { panel_fit_text <- FALSE; fit_room <- 0 }
+  }
   ax_y <- axis_spec(ctx, "y", yr, mult = if (bubbles) c(0.09, 0.09) else c(0.05, 0.05 + min(fit_room, 0.4) * 1.1))
   axes_ready(ctx, "any", x = ax_x, y = ax_y)
 
   # ---- legend
   fit_labels <- NULL
-  if (has_fit && opt_flag(o, "fit_legend", TRUE) && nrow(fits) && !panel_fit_text) {
+  if (has_fit && opt_flag(o, "fit_legend", TRUE) && nrow(fits) && is.null(ctx$facet)) {
     lab <- stats::setNames(fits$label, fits$group)
     lab <- lab[!is.na(lab) & names(lab) %in% keys]
     if (length(lab)) fit_labels <- if (length(keys) == 1) lab else stats::setNames(paste0(names(lab), "\n", lab), names(lab))
@@ -223,10 +230,10 @@ render_xy <- function(ctx) {
       guides(fill = if (length(keys) > 1) guide_legend(order = 1, override.aes = list(size = pt_size(8, 21, 0.35), alpha = 1))
                     else "none", colour = "none")))
   }
-  p <- xy_assemble(ctx, ax_x, ax_y, layers, legend, keys, key_labels = stats::setNames(legend_labels, keys),
-                   key_w = key_w, scales = scales)
-  if (bubbles) p <- p + theme(legend.title = element_text(colour = ctx$th$text, size = ctx$f$legend, face = "bold"))
-  if (!is.null(fit_labels)) p <- p + theme(legend.spacing.y = grid::unit(ctx$f$legend * 0.45, "pt"))
-  p
+  extra <- list(
+    if (bubbles) theme(legend.title = element_text(colour = ctx$th$text, size = ctx$f$legend, face = "bold")),
+    if (!is.null(fit_labels)) theme(legend.spacing.y = grid::unit(ctx$f$legend * 0.45, "pt")))
+  xy_assemble(ctx, ax_x, ax_y, layers, legend, keys, key_labels = stats::setNames(legend_labels, keys),
+              key_w = key_w, scales = scales, theme_extra = extra)
 }
 register("xy", function(ctx) with_facets(ctx, render_xy, xy_finish))

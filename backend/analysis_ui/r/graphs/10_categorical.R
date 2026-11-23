@@ -285,14 +285,26 @@ kind_box <- function(ctx, S) {
            d$nlo <- pmax(d$med - half, d$q1); d$nhi <- pmin(d$med + half, d$q3)
            m$notchlower <- quote(.data$nlo); m$notchupper <- quote(.data$nhi)
          }
-         box <- outlined_geom(geom_boxplot, m, d, outline, ow, ctx$ink, stat = "identity", width = bw,
-                              alpha = opt_num(o, "fill_alpha", 0.6), notch = notch, fatten = 1.8,
-                              show.legend = TRUE, key_glyph = "rect")
-         out <- list(whisk, box)
-         if (outline == "none") {
-           hw <- bw / 2 * (if (notch) 0.5 else 1)
-           out <- c(out, list(geom_segment(aes(x = .data$x - hw, xend = .data$x + hw, y = .data$med, yend = .data$med),
-                                           data = d, colour = ctx$ink, linewidth = lw(1.5), show.legend = FALSE)))
+         alpha <- opt_num(o, "fill_alpha", 0.6)
+         if (notch) {
+           out <- list(whisk, outlined_geom(geom_boxplot, m, d, outline, ow, ctx$ink, stat = "identity", width = bw,
+                                            alpha = alpha, notch = TRUE, fatten = 1.8, show.legend = TRUE, key_glyph = "rect"))
+           if (outline == "none") {
+             out <- c(out, list(geom_segment(aes(x = .data$x - bw / 4, xend = .data$x + bw / 4, y = .data$med, yend = .data$med),
+                                             data = d, colour = ctx$ink, linewidth = lw(1.5), show.legend = FALSE)))
+           }
+         } else {
+           # plain boxes as one rectangle layer + one median layer (much faster than a boxplot grob per box)
+           box <- outlined_geom(geom_rect, aes(xmin = .data$x - bw / 2, xmax = .data$x + bw / 2, ymin = .data$q1,
+                                               ymax = .data$q3, fill = .data$key), d, outline, ow, ctx$ink,
+                                alpha = alpha, linejoin = "mitre", show.legend = TRUE)
+           mm <- aes(x = .data$x - bw / 2, xend = .data$x + bw / 2, y = .data$med, yend = .data$med)
+           med_pt <- if (outline == "none") 1.5 else ow * 1.8
+           med <- if (outline == "match") {
+             mm$colour <- quote(.data$key)
+             geom_segment(mm, data = d, linewidth = lw(med_pt), lineend = "butt", show.legend = FALSE)
+           } else geom_segment(mm, data = d, linewidth = lw(med_pt), lineend = "butt", colour = ctx$ink, show.legend = FALSE)
+           out <- list(whisk, box, med)
          }
          if (show_out) {
            od <- do.call(rbind, lapply(st, function(b) if (length(b$out)) data.frame(x = b$cx, y = b$out, key = b$key)))
@@ -644,7 +656,8 @@ cat_finish <- function(ctx, parts) {
 }
 
 categorical <- function(kind_fn, grouped) {
-  function(ctx) with_facets(ctx, function(cx) render_categorical(cx, kind_fn, grouped), cat_finish, free_x_ok = FALSE)
+  function(ctx) with_facets(ctx, function(cx) render_categorical(cx, kind_fn, grouped), cat_finish, free_x_ok = FALSE,
+                            stages = c("base", "final"))
 }
 register("column_scatter", categorical(kind_scatter, FALSE))
 register("column_bar", categorical(kind_bar, FALSE))
