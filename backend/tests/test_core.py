@@ -95,7 +95,7 @@ def test_jsonable_handles_numpy_and_nan():
 
 def test_every_registered_schema_is_well_formed():
     registry.discover()
-    kinds = {"variable", "variables", "choice", "bool", "number", "integer", "text", "level", "color", "group_colors"}
+    kinds = {"variable", "variables", "choice", "bool", "number", "integer", "text", "level", "color", "group_colors", "annotations"}
     for d in list(registry.ANALYSES.values()) + list(GRAPHS.values()):
         names = {o["name"] for o in d.options}
         for o in d.options:
@@ -277,3 +277,28 @@ def test_api_errors_are_reported_not_raised():
     assert r["status"] == "error"
     r = client.post("/api/transform", json={"data": WIDE, "op": "zscore", "columns": ["Control"]}).json()
     assert r["status"] == "ok" and r["columns"][0]["name"] == "Control (z)"
+
+
+# ------------------------------------------------------------------ layouts
+def test_layout_composes_panels_with_unique_ids():
+    import re
+    from analysis_ui import layouts
+    panel = {"graph": {"type": "column_bar", "engine": "matplotlib",
+                       "options": {"layout": "wide", "columns": ["Control", "Drug A"]}}, "data": WIDE}
+    spec = {"panels": [panel, panel, panel], "cols": 2, "width": 6, "panel_height": 2.5, "gap": 0.2, "labels": "A"}
+    svg = layouts.render_layout(spec, "svg").decode()
+    assert 'width="432.00pt"' in svg and 'height="374.40pt"' in svg       # 6 in × (2 × 2.5 + 0.2) in
+    ids = re.findall(r'\bid="([^"]+)"', svg)
+    assert len(ids) == len(set(ids)) and any(i.startswith("p2-") for i in ids)
+    assert ">A</text>" in svg and ">C</text>" in svg
+    from PIL import Image
+    png = Image.open(io.BytesIO(layouts.render_layout(spec, "png", dpi=100)))
+    assert png.size == (600, 520)
+    assert layouts.render_layout(spec, "pdf", dpi=100)[:4] == b"%PDF"
+    with pytest.raises(AnalysisError):
+        layouts.render_layout({"panels": []})
+    r = client.post("/api/layouts/render", json={"layout": spec}).json()
+    assert r["status"] == "ok" and r["svg"].startswith("<svg")
+    bad = dict(spec, panels=[{"graph": {"type": "column_bar", "options": {"layout": "wide", "columns": []}}, "data": WIDE}])
+    r = client.post("/api/layouts/render", json={"layout": bad}).json()
+    assert r["status"] == "error" and r["message"].startswith("Panel 1")

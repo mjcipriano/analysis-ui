@@ -22,7 +22,7 @@ export interface Sheet {
 }
 
 export interface OptionDef {
-  type: 'variable' | 'variables' | 'choice' | 'bool' | 'number' | 'integer' | 'text' | 'level' | 'color' | 'group_colors'
+  type: 'variable' | 'variables' | 'choice' | 'bool' | 'number' | 'integer' | 'text' | 'level' | 'color' | 'group_colors' | 'annotations'
   name: string
   label: string
   default: any
@@ -125,6 +125,28 @@ export type Selection =
   | { kind: 'sheet'; id: string }
   | { kind: 'analysis'; id: string }
   | { kind: 'graph'; id: string }
+  | { kind: 'layout'; id: string }
 
 export interface WireColumn { name: string; type: ColType; values: Cell[]; levels?: string[] }
 export interface WireSheet { name: string; columns: WireColumn[] }
+
+export type Annotation =
+  | { kind: 'text'; x: number; y: number; text: string; size?: number | null; color?: string; bold?: boolean; italic?: boolean; angle?: number; align?: 'left' | 'center' | 'right' }
+  | { kind: 'arrow' | 'line'; x: number; y: number; x2: number; y2: number; color?: string; width?: number }
+
+/** Several graphs arranged on one page with panel labels. */
+export interface LayoutItem {
+  id: string
+  name: string
+  graphIds: string[]
+  cols: number
+  width: number
+  panelHeight: number
+  gap: number
+  labels: 'A' | 'a' | '1' | 'none'
+  labelSize: number
+  status: RunStatus
+  svg?: string
+  message?: string
+  ranKey?: string
+}

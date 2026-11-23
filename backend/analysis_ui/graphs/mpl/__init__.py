@@ -44,6 +44,9 @@ def render(payload: dict) -> bytes:
     o = payload["options"]
     with rc_context(rc=build_rc(o["_fonts"], o["_theme"], bool(payload.get("editable_text")))):
         p = Plot(payload).begin()
-        draw(p)
+        if p.computed.get("facets"):
+            p.draw_facets(draw)
+        else:
+            draw(p)
         p.finish()
         return p.save()

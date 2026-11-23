@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { api } from './api'
 import { autofill, blankSheet, defaultsOf, inferType, isBlank, migrateOptions, newColumn, sheetFromWire, uniqueName, columnLetter } from './data'
 import { uid } from './format'
-import type { AnalysisItem, Catalog, Cell, ColType, Column, GraphItem, Selection, Sheet, WireColumn, WireSheet } from './types'
+import type { AnalysisItem, Catalog, Cell, ColType, Column, GraphItem, LayoutItem, Selection, Sheet, WireColumn, WireSheet } from './types'
 
 export type Item = AnalysisItem | GraphItem
 
@@ -12,9 +12,14 @@ interface Project {
   name: string
   sheets: Sheet[]
   items: Item[]
+  layouts?: LayoutItem[]
 }
 
 interface State extends Project {
+  layouts: LayoutItem[]
+  addLayout: (graphIds?: string[]) => void
+  patchLayout: (id: string, patch: Partial<LayoutItem>) => void
+  deleteLayout: (id: string) => void
   catalog: Catalog | null
   catalogError: string | null
   selection: Selection
@@ -117,6 +122,7 @@ export const useStore = create<State>((set, get) => ({
   name: 'Untitled project',
   sheets: [],
   items: [],
+  layouts: [],
   catalog: null,
   catalogError: null,
   selection: { kind: 'welcome' },
@@ -146,11 +152,12 @@ export const useStore = create<State>((set, get) => ({
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   setDark: (dark) => set({ dark }),
   setProjectName: (name) => set({ name }),
-  newProject: () => set({ name: 'Untitled project', sheets: [], items: [], selection: { kind: 'welcome' }, past: [], future: [] }),
+  newProject: () => set({ name: 'Untitled project', sheets: [], items: [], layouts: [], selection: { kind: 'welcome' }, past: [], future: [] }),
   loadProject: (p) => set({
     name: p.name || 'Untitled project',
     sheets: p.sheets ?? [],
     items: (p.items ?? []).map((it) => ({ ...it, status: it.status === 'running' ? 'idle' : it.status })),
+    layouts: (p.layouts ?? []).map((l) => ({ ...l, status: l.status === 'running' ? 'idle' : l.status })),
     selection: p.sheets?.length ? { kind: 'sheet', id: p.sheets[0].id } : { kind: 'welcome' },
     past: [], future: [],
   }),
@@ -178,7 +185,8 @@ export const useStore = create<State>((set, get) => ({
   deleteSheet: (id) => set((s) => {
     const sheets = s.sheets.filter((x) => x.id !== id)
     const items = s.items.filter((it) => it.sheetId !== id)
-    return { sheets, items, selection: sheets.length ? { kind: 'sheet', id: sheets[0].id } : { kind: 'welcome' } }
+    const gone = new Set(s.items.filter((it) => it.sheetId === id).map((it) => it.id))
+    return { sheets, items, layouts: s.layouts.map((l) => ({ ...l, graphIds: l.graphIds.filter((g) => !gone.has(g)) })), selection: sheets.length ? { kind: 'sheet', id: sheets[0].id } : { kind: 'welcome' } }
   }),
 
   duplicateSheet: (id) => set((s) => {
@@ -394,11 +402,26 @@ export const useStore = create<State>((set, get) => ({
 
   renameItem: (id, name) => set((s) => ({ items: s.items.map((it) => (it.id === id ? ({ ...it, name: name.trim() || it.name } as Item) : it)) })),
 
+  addLayout: (graphIds) => set((s) => {
+    const ids = graphIds ?? s.items.filter((i) => i.kind === 'graph').slice(0, 4).map((i) => i.id)
+    const layout: LayoutItem = {
+      id: uid('l'), name: uniqueName('Figure 1', s.layouts.map((l) => l.name)), graphIds: ids,
+      cols: ids.length === 1 ? 1 : 2, width: 7, panelHeight: 2.8, gap: 0.15, labels: 'A', labelSize: 14, status: 'idle',
+    }
+    return { layouts: [...s.layouts, layout], selection: { kind: 'layout', id: layout.id } }
+  }),
+  patchLayout: (id, patch) => set((s) => ({ layouts: s.layouts.map((l) => (l.id === id ? { ...l, ...patch } : l)) })),
+  deleteLayout: (id) => set((s) => ({
+    layouts: s.layouts.filter((l) => l.id !== id),
+    selection: s.selection.kind === 'layout' && s.selection.id === id ? (s.sheets.length ? { kind: 'sheet', id: s.sheets[0].id } : { kind: 'welcome' }) : s.selection,
+  })),
+
   deleteItem: (id) => set((s) => {
     const it = s.items.find((x) => x.id === id)
     const selected = (s.selection.kind === 'analysis' || s.selection.kind === 'graph') && s.selection.id === id
     return {
       items: s.items.filter((x) => x.id !== id),
+      layouts: s.layouts.map((l) => (l.graphIds.includes(id) ? { ...l, graphIds: l.graphIds.filter((g) => g !== id) } : l)),
       selection: selected && it ? (s.sheets.some((x) => x.id === it.sheetId) ? { kind: 'sheet', id: it.sheetId } : { kind: 'welcome' }) : s.selection,
     }
   }),
@@ -496,6 +519,7 @@ export function projectSnapshot(includeOutputs = true): Project & { format: stri
   const s = useStore.getState()
   return {
     format: 'analysis-ui-project', version: 1, name: s.name, sheets: s.sheets,
+    layouts: s.layouts.map((l) => (includeOutputs ? l : { ...l, svg: undefined, ranKey: undefined, status: 'idle' as const })),
     items: includeOutputs ? s.items : s.items.map((it) => {
       const { ...rest } = it as any
       delete rest.results; delete rest.svg; delete rest.meta; delete rest.ranKey
@@ -520,7 +544,7 @@ export async function restoreSession() {
     if (s.dark !== prev.dark || s.defaultEngine !== prev.defaultEngine) {
       idbSet('prefs', { dark: s.dark, defaultEngine: s.defaultEngine }).catch(() => {})
     }
-    if (s.sheets === prev.sheets && s.items === prev.items && s.name === prev.name && s.selection === prev.selection) return
+    if (s.sheets === prev.sheets && s.items === prev.items && s.layouts === prev.layouts && s.name === prev.name && s.selection === prev.selection) return
     window.clearTimeout(timer)
     timer = window.setTimeout(() => {
       idbSet('session', { ...projectSnapshot(true), selection: useStore.getState().selection }).catch(() => {})

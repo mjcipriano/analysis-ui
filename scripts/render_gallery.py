@@ -57,6 +57,17 @@ CASES = [
     ("roc", "diagnostic", {"outcome": "Status", "positive": "Disease", "predictors": ["Marker A", "Marker B"]}),
     ("volcano", "volcano", {"effect": "log2FC", "p": "P value", "label": "Gene"}),
     ("forest", "subgroups", {"label": "Subgroup", "estimate": "HR", "lower": "Lower", "upper": "Upper"}),
+    ("column_bar", "two_way", {"layout": "long", "dep": "Response", "group": "Treatment", "facet": "Sex", "stat_test": "welch",
+                               "annotations": [{"kind": "text", "x": 0.3, "y": 0.2, "text": "Note", "bold": True},
+                                               {"kind": "arrow", "x": 0.3, "y": 0.23, "x2": 0.22, "y2": 0.42}]}, "facet"),
+    ("box", "two_way", {"layout": "long", "dep": "Response", "group": "Treatment", "facet": "Sex", "show_points": True, "facet_axes": "free_y"}, "facet"),
+    ("grouped_bar", "regression", {"layout": "long", "dep": "Systolic BP", "x": "Sex", "group": "Hypertension", "facet": "Sex"}, "facet"),
+    ("dose_response", "dose_response", {"x": "Concentration (µM)", "y": ["Response (%)"], "facet": "Compound"}, "facet"),
+    ("xy_regression", "regression", {"x": "Age", "y": ["Systolic BP"], "group": "Sex", "facet": "Hypertension", "facet_axes": "free"}, "facet"),
+    ("density", "two_way", {"layout": "long", "dep": "Response", "group": "Treatment", "facet": "Sex"}, "facet"),
+    ("ecdf", "two_way", {"layout": "long", "dep": "Response", "group": "Treatment", "facet": "Sex"}, "facet"),
+    ("qq", "two_way", {"layout": "long", "dep": "Response", "group": "Treatment", "facet": "Sex", "facet_cols": 1}, "facet"),
+    ("interaction_line", "two_way", {"layout": "long", "dep": "Response", "x": "Treatment", "facet": "Sex"}, "facet"),
     ("waterfall", "tumor_response", {"value": "Best change (%)", "label": "Patient", "group": "Arm", "hlines": "-30, 20"}),
 ]
 

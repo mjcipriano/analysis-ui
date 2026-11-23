@@ -134,10 +134,64 @@ def style_options(features: set[str]) -> list[dict]:
           opt.number("tick_size", "Tick label size (pt)", None, min=4, max=60, step=0.5, section=s, placeholder="auto"),
           opt.number("legend_size", "Legend text size (pt)", None, min=4, max=60, step=0.5, section=s, placeholder="auto")]
 
+    o += [{"type": "annotations", "name": "annotations", "label": "Text and arrows", "default": [],
+           "section": "Annotations",
+           "help": "Use the Text and Arrow buttons above the graph, then drag items into place."}]
+
     s = "Size"
     o += [opt.number("width", "Width (inches)", 5.0, min=1.5, max=30, step=0.25, section=s),
           opt.number("height", "Height (inches)", 4.0, min=1.5, max=30, step=0.25, section=s)]
     return o
+
+
+def clean_annotations(items) -> list[dict]:
+    """Validated free-form annotations for the engines.
+
+    Coordinates are fractions of the whole figure with the origin at the
+    TOP-LEFT corner (x to the right, y downwards), so they do not depend on
+    the data or the engine.
+
+    ``{"kind": "text", "x", "y", "text", "size" (pt or None = base font size),
+       "color" ("" = theme text colour), "bold", "italic", "angle" (degrees,
+       counter-clockwise), "align" ("left" | "center" | "right")}``
+    ``{"kind": "arrow" | "line", "x", "y", "x2", "y2", "color", "width" (pt)}``
+       — an arrow has its head at (x2, y2).
+    """
+    out = []
+    for a in items or []:
+        if not isinstance(a, dict):
+            continue
+        try:
+            x, y = float(a.get("x")), float(a.get("y"))
+        except (TypeError, ValueError):
+            continue
+        x, y = min(max(x, 0.0), 1.0), min(max(y, 0.0), 1.0)
+        color = a.get("color") if isinstance(a.get("color"), str) else ""
+        kind = a.get("kind")
+        if kind == "text":
+            text = str(a.get("text") or "").strip()
+            if not text:
+                continue
+            try:
+                size = float(a["size"]) if a.get("size") not in (None, "") else None
+            except (TypeError, ValueError):
+                size = None
+            try:
+                angle = float(a.get("angle") or 0)
+            except (TypeError, ValueError):
+                angle = 0.0
+            out.append({"kind": "text", "x": x, "y": y, "text": text, "size": size, "color": color,
+                        "bold": bool(a.get("bold")), "italic": bool(a.get("italic")), "angle": angle,
+                        "align": a.get("align") if a.get("align") in ("left", "center", "right") else "center"})
+        elif kind in ("arrow", "line"):
+            try:
+                x2, y2 = float(a.get("x2")), float(a.get("y2"))
+                width = float(a.get("width") or 1.2)
+            except (TypeError, ValueError):
+                continue
+            out.append({"kind": kind, "x": x, "y": y, "x2": min(max(x2, 0.0), 1.0), "y2": min(max(y2, 0.0), 1.0),
+                        "color": color, "width": min(max(width, 0.1), 12.0)})
+    return out[:100]
 
 
 def _cycle(colors: list[str], n: int, sequential: bool) -> list[str]:
@@ -221,6 +275,7 @@ def resolve(o: dict, color_keys: list[str], single: bool = False,
             except ValueError:
                 pass
         return out
+    o["_annotations"] = clean_annotations(o.get("annotations"))
     o["_hlines"] = parse_lines(o.get("hlines"))
     o["_vlines"] = parse_lines(o.get("vlines"))
     return o

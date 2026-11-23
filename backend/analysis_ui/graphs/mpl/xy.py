@@ -54,7 +54,8 @@ def xy(p: Plot):
     grp = main["group"].astype(str).to_numpy()
     X, Y = main["x"].to_numpy(dtype=float), main["y"].to_numpy(dtype=float)
     S = main["size"].to_numpy(dtype=float) if has_size else None
-    smax = float(np.nanmax(np.where(S > 0, S, np.nan))) if has_size and np.any(S > 0) else None
+    S_all = p.full_frames["main"]["size"].to_numpy(dtype=float) if has_size else None     # same scale in all facets
+    smax = float(np.nanmax(np.where(S_all > 0, S_all, np.nan))) if has_size and np.any(S_all > 0) else None
     d_max = p.num("size_max", 22)
     fit_labels = {str(f["group"]): f["label"] for f in (p.computed.get("fits") or [])}
     sgrp = summ["group"].astype(str).to_numpy() if has_summary else None
@@ -151,7 +152,16 @@ def xy(p: Plot):
 
     # ---- legend extras: fit results and bubble sizes
     extra = False
-    if fit_entries and o.get("fit_legend", True):
+    if fit_entries and o.get("fit_legend", True) and p.faceted:
+        # fit results differ between panels: write them inside each panel instead of the legend
+        lines = [(str(fit_labels[s_]).replace(" (R²", ", R²").rstrip(")") if " (R²" in str(fit_labels[s_])
+                  else str(fit_labels[s_]), col) for s_, col, _ in fit_entries if s_ in fit_labels]
+        fs = p.fonts["tick"] * 0.85
+        for k, (txt, col) in enumerate(lines):
+            ax.annotate(txt, (0, 1), xycoords="axes fraction", xytext=(0.5 * fs, -0.5 * fs - k * fs * 1.25),
+                        textcoords="offset points", ha="left", va="top", fontsize=fs,
+                        color=p.accent(col, 0.25), zorder=Z_SUMMARY + 1)
+    elif fit_entries and o.get("fit_legend", True):
         if len(series) == 1:
             p.legend_items = []
         for s, col, ls in fit_entries:
@@ -159,7 +169,7 @@ def xy(p: Plot):
                 p.lg_line(wrap_fit_label(fit_labels[s]), col, lw, ls)
                 extra = True
     if has_size and smax and show_points and raw:
-        smin = float(np.nanmin(np.where(S > 0, S, np.nan)))
+        smin = float(np.nanmin(np.where(S_all > 0, S_all, np.nan)))
         vals = [v for v in mticker.MaxNLocator(nbins=4, steps=[1, 2, 2.5, 5, 10]).tick_values(smin, smax)
                 if smin * 0.999 <= v <= smax * 1.001 and v > 0]
         vals = [vals[0], vals[len(vals) // 2], vals[-1]] if len(vals) > 3 else (vals or [smax])

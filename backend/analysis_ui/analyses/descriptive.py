@@ -13,7 +13,9 @@ from functools import lru_cache
 import numpy as np
 from scipy import stats
 
-from ..core import analysis, opt, Context, Results, AnalysisError, new_figure, COLORS, stars, fmt_p
+from scipy import optimize
+
+from ..core import analysis, opt, Context, Results, AnalysisError, new_figure, COLORS, stars, fmt_p, p_text
 
 CAT = "Describe & explore"
 
@@ -50,12 +52,6 @@ def fnum(x: float, digits: int = 4) -> str:
     if abs(x) >= 10 ** digits or abs(x) < 1e-4:
         return f"{x:.{digits - 1}e}"
     return f"{x:.{digits}g}"
-
-
-def p_text(p: float) -> str:
-    """'P = 0.0031' or 'P < 0.0001' for plain-language summaries."""
-    s = fmt_p(p)
-    return f"P {s[0]} {s[1:]}" if s.startswith("<") else f"P = {s}"
 
 
 def layout_options(ctx: Context, extra: tuple = ()) -> dict:
@@ -557,7 +553,66 @@ def _grubbs_critical(n: int, alpha: float) -> float:
     return (n - 1) / math.sqrt(n) * math.sqrt(tc * tc / (n - 2 + tc * tc))
 
 
-def _find_outliers(x: np.ndarray, method: str, alpha: float, max_out: int | None, k: float) -> tuple[list[dict], str]:
+def rout_fit(x: np.ndarray) -> tuple[float, float]:
+    """Robust location and robust SD of the residuals (RSDR) for ROUT.
+
+    The centre minimises the Lorentzian merit function
+    ``sum(ln(1 + (residual / RSDR)^2))`` and RSDR is the 68.27th percentile
+    of the absolute residuals times N/(N − K), K = 1 fitted parameter. The
+    two are alternated until they stop changing."""
+    x = np.asarray(x, float)
+    n = len(x)
+
+    def rsdr(c):
+        return quantile(np.abs(x - c), 0.6827) * n / (n - 1)
+
+    c = float(np.median(x))
+    s = rsdr(c)
+    grid = np.unique(np.concatenate([x, np.linspace(x.min(), x.max(), 201)]))
+    for _ in range(100):
+        if s <= 0:
+            break
+        merit = lambda m: float(np.sum(np.log1p(((x - m) / s) ** 2)))  # noqa: E731
+        vals = np.sum(np.log1p(((x[None, :] - grid[:, None]) / s) ** 2), axis=1)
+        i = int(np.argmin(vals))
+        lo, hi = grid[max(i - 1, 0)], grid[min(i + 1, len(grid) - 1)]
+        c_new = float(optimize.minimize_scalar(merit, bounds=(lo, hi), method="bounded",
+                                               options={"xatol": 1e-12 * max(1.0, abs(hi - lo))}).x) if hi > lo else float(lo)
+        s_new = rsdr(c_new)
+        done = abs(c_new - c) <= 1e-9 * max(s, 1e-300) and abs(s_new - s) <= 1e-9 * s
+        c, s = c_new, s_new
+        if done:
+            break
+    return c, float(s)
+
+
+def rout_outliers(x: np.ndarray, q: float) -> tuple[list[dict], float, float]:
+    """ROUT (Motulsky & Brown 2006) for one sample: (outliers, robust mean, RSDR).
+
+    Each absolute residual from the robust fit is divided by RSDR and turned
+    into a two-tailed P value (t distribution, N − 1 df). Going from the
+    70th-percentile residual upwards (rank i of N, smallest first), the
+    first residual with P < Q·(N − (i − 1))/N and every larger one are
+    outliers (false discovery rate Q)."""
+    x = np.asarray(x, float)
+    n = len(x)
+    centre, s = rout_fit(x)
+    if s <= 0:
+        return [], centre, s
+    resid = np.abs(x - centre)
+    order = np.argsort(resid, kind="stable")
+    tval = resid[order] / s
+    pval = 2 * stats.t.sf(tval, n - 1)
+    for i in range(max(1, int(0.70 * n)), n + 1):
+        thr = q * (n - (i - 1)) / n
+        if pval[i - 1] < thr:
+            return ([{"index": int(order[j]), "stat": float(tval[j]), "p": float(pval[j]),
+                      "crit": float(q * (n - j) / n)} for j in range(i - 1, n)], centre, s)
+    return [], centre, s
+
+
+def _find_outliers(x: np.ndarray, method: str, alpha: float, max_out: int | None, k: float,
+                   q: float = 0.01) -> tuple[list[dict], str]:
     """Outliers of one sample → list of {index, stat, crit, p} and a note."""
     n = len(x)
     found: list[dict] = []
@@ -566,6 +621,11 @@ def _find_outliers(x: np.ndarray, method: str, alpha: float, max_out: int | None
     if is_constant(x):
         return found, ""
     idx = np.arange(n)
+    if method == "rout":
+        found, centre, s = rout_outliers(x, q)
+        if s <= 0:
+            return found, "RSDR is zero (most values are identical); ROUT cannot be applied"
+        return found, f"robust mean {fnum(centre)}, RSDR {fnum(s)}"
     if method in ("grubbs", "grubbs_iter"):
         keep = np.ones(n, bool)
         while keep.sum() >= 3 and not is_constant(x[keep]):
@@ -619,6 +679,7 @@ def _find_outliers(x: np.ndarray, method: str, alpha: float, max_out: int | None
 
 
 _OUTLIER_METHODS = [
+    ("rout", "ROUT (robust fit + false discovery rate Q)"),
     ("grubbs", "Grubbs' test (one outlier)"),
     ("grubbs_iter", "Iterative Grubbs' test"),
     ("gesd", "Generalized ESD (Rosner)"),
@@ -627,7 +688,7 @@ _OUTLIER_METHODS = [
 ]
 _OUTLIER_STAT = {"grubbs": ("G", "Critical G"), "grubbs_iter": ("G", "Critical G"),
                  "gesd": ("R", "Critical λ"), "tukey": ("Value", "Fence crossed"),
-                 "mad": ("Modified Z", "Cut-off")}
+                 "mad": ("Modified Z", "Cut-off"), "rout": ("|Residual| / RSDR", "P must be below")}
 
 
 @analysis(
@@ -636,7 +697,10 @@ _OUTLIER_STAT = {"grubbs": ("G", "Critical G"), "grubbs_iter": ("G", "Critical G
     keywords="grubbs rosner esd rout tukey iqr extreme values clean",
     options=[
         *opt.group_layout(min_groups=1),
-        opt.choice("method", "Method", _OUTLIER_METHODS, default="grubbs"),
+        opt.choice("method", "Method", _OUTLIER_METHODS, default="rout"),
+        opt.number("rout_q", "ROUT coefficient Q (%)", 1, min=0.001, max=50, step=0.5, nullable=False,
+                   section="Options", visible={"method": "rout"},
+                   help="Maximum desired false discovery rate. Smaller Q = stricter; Prism's default is 1%."),
         opt.alpha(section="Options"),
         opt.integer("max_outliers", "Maximum number of outliers", None, min=1, max=100, section="Options",
                     visible={"method": "gesd"}, placeholder="auto",
@@ -647,14 +711,15 @@ _OUTLIER_STAT = {"grubbs": ("G", "Critical G"), "grubbs_iter": ("G", "Critical G
     ])
 def outliers(ctx: Context) -> Results:
     data = groups_with_rows(ctx)
-    method = ctx.opt("method", "grubbs")
+    method = ctx.opt("method", "rout")
     alpha = float(ctx.opt("alpha", 0.05))
+    q = float(ctx.opt("rout_q", 1)) / 100.0
     max_out = ctx.opt("max_outliers")
     k = float(ctx.opt("iqr_k", 1.5))
     if all(len(v[0]) < 3 for v in data.values()):
         raise AnalysisError("Outlier detection needs at least 3 values in a group.")
     r = Results()
-    label = dict(_OUTLIER_METHODS)[method]
+    label = f"ROUT (Q = {q * 100:g}%)" if method == "rout" else dict(_OUTLIER_METHODS)[method]
     summ = r.table("Outlier summary", [("group", "Group", "text"), ("n", "n", "int"),
                                        ("n_out", "Outliers", "int"), ("values", "Outlier values", "text"),
                                        ("mean", "Mean (all)", "num"), ("mean_clean", "Mean (cleaned)", "num"),
@@ -663,13 +728,13 @@ def outliers(ctx: Context) -> Results:
     s_lab, c_lab = _OUTLIER_STAT[method]
     cols = [("group", "Group", "text"), ("row", "Row", "int"), ("value", "Value", "num"),
             ("stat", s_lab, "num"), ("crit", c_lab, "num")]
-    if method.startswith("grubbs"):
+    if method.startswith("grubbs") or method == "rout":
         cols.append(("p", "P value", "p"))
     detail_rows = []
     masks = {}
     total = 0
     for name, (x, rows) in data.items():
-        found, note = _find_outliers(x, method, alpha, int(max_out) if max_out else None, k)
+        found, note = _find_outliers(x, method, alpha, int(max_out) if max_out else None, k, q)
         mask = np.zeros(len(x), bool)
         for f in found:
             mask[f["index"]] = True
@@ -684,6 +749,13 @@ def outliers(ctx: Context) -> Results:
                      sd=float(x.std(ddof=1)) if len(x) > 1 else math.nan,
                      sd_clean=float(clean.std(ddof=1)) if len(clean) > 1 else math.nan, note=note)
     notes = {
+        "rout": f"ROUT method (Motulsky & Brown 2006) with Q = {q * 100:g}%, fitting one parameter (the mean) to each group. "
+                "Step 1, robust fit: the centre minimises Σ ln(1 + (residual/RSDR)²), which assumes Lorentzian scatter so that "
+                "extreme values have little influence. RSDR, the robust SD of the residuals, is the 68.27th percentile of the "
+                "absolute residuals × N/(N − 1); centre and RSDR are refined alternately until stable. "
+                "Step 2: each |residual|/RSDR is converted to a two-tailed P value (t distribution, N − 1 df). "
+                "Step 3, false discovery rate: residuals are ranked from smallest to largest and, starting at the 70th "
+                "percentile, the first rank i with P < Q·(N − (i − 1))/N and all larger residuals are declared outliers.",
         "grubbs": f"Grubbs' test (extreme studentized deviate), two-sided, α = {alpha:g}. Tests only the single most extreme value in each group.",
         "grubbs_iter": f"Grubbs' test applied repeatedly (α = {alpha:g}): the most extreme value is removed and the test repeated until no outlier is found. "
                        "Repeated testing can miss outliers that mask each other; the generalized ESD test handles that better.",
@@ -692,6 +764,9 @@ def outliers(ctx: Context) -> Results:
         "mad": "Modified Z score = 0.6745 × (value − median) / MAD; values with |Z| > 3.5 are flagged (Iglewicz & Hoaglin 1993).",
     }
     summ.note(notes[method])
+    if method == "rout":
+        summ.note("Q is the maximum desired false discovery rate: with Q = 1%, no more than about 1% of the identified "
+                  "outliers are expected to be false. Assumes that the values, apart from the outliers, are Gaussian.")
     if method in ("grubbs", "grubbs_iter", "gesd"):
         summ.note("These tests assume that the values, apart from the outliers, come from a Gaussian distribution.")
     if detail_rows:

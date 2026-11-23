@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, importer, transforms
+from . import __version__, importer, layouts, transforms
 from .core import registry
 from .core.curvefit import MODELS
 from .core.errors import AnalysisError
@@ -51,6 +51,12 @@ class GraphRequest(BaseModel):
     format: str = "svg"
     dpi: int = 300
     editable_text: bool = False
+
+
+class LayoutRequest(BaseModel):
+    layout: dict[str, Any]
+    format: str = "svg"
+    dpi: int = 300
 
 
 class TextImport(BaseModel):
@@ -124,6 +130,23 @@ def export(req: GraphRequest):
     except Exception as exc:
         return JSONResponse(_error(exc), status_code=400)
     return Response(content=img, media_type=graph_registry.FORMATS[req.format])
+
+
+@app.post("/api/layouts/render")
+def layout_render(req: LayoutRequest):
+    try:
+        return {"status": "ok", "svg": layouts.render_layout(req.layout, "svg").decode("utf-8")}
+    except Exception as exc:
+        return _error(exc)
+
+
+@app.post("/api/layouts/export")
+def layout_export(req: LayoutRequest):
+    try:
+        img = layouts.render_layout(req.layout, req.format, req.dpi)
+    except Exception as exc:
+        return JSONResponse(_error(exc), status_code=400)
+    return Response(content=img, media_type=graph_registry.FORMATS.get(req.format, "application/octet-stream"))
 
 
 @app.post("/api/import/file")

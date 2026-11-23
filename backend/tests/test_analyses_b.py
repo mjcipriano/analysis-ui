@@ -123,6 +123,7 @@ NLR = {"x": X_DR, "y": [Y_DR], "group": "Compound"}
 def test_nlr_4pl_matches_r_nls():
     # R: nls(y ~ b + (t-b)/(1+(e/x)^h), CompoundA, start=list(b=0,t=100,e=0.1,h=1))
     res = run("nonlinear_regression", sample("dose_response.csv"), NLR)
+    res_sym = run("nonlinear_regression", sample("dose_response.csv"), {**NLR, "ci_method": "asymptotic"})
     best = table(res, "Best-fit values")
     ref = {"Bottom": (3.3870489869, 1.647495294442), "Top": (98.3540467867, 1.419471981432),
            "EC50": (0.1156072363, 0.008934210714), "HillSlope": (1.1994260622, 0.101626277010)}
@@ -131,8 +132,10 @@ def test_nlr_4pl_matches_r_nls():
         assert row["value"] == approx(est, 1e-5)
         assert row["se"] == approx(se, 1e-4)
         tcrit = stats.t.ppf(0.975, 26)
-        assert row["lo"] == approx(est - tcrit * se, 1e-4, 1e-4)
-        assert row["hi"] == approx(est + tcrit * se, 1e-4, 1e-4)
+        sym = param(table(res_sym, "Best-fit values"), name, "Compound A")
+        assert sym["lo"] == approx(est - tcrit * se, 1e-4, 1e-4)
+        assert sym["hi"] == approx(est + tcrit * se, 1e-4, 1e-4)
+        assert (sym["value"], sym["se"]) == (row["value"], row["se"])
     gof = param(table(res, "Goodness of fit"), "Compound A", key="dataset")
     assert gof["ss"] == approx(412.1618, 1e-5) and gof["df"] == 26 and gof["n"] == 30
     assert gof["syx"] == approx(math.sqrt(412.1618 / 26), 1e-5)
@@ -161,7 +164,7 @@ def test_nlr_constraints_and_weighting_match_r():
     assert param(best, "Bottom (fixed)", "Compound A")["value"] == 0
     assert param(table(res, "Goodness of fit"), "Compound A", key="dataset")["df"] == 28
     # R: nls(..., weights = 1/y^2)
-    res = run("nonlinear_regression", data, {**NLR, "weighting": "1/y2"})
+    res = run("nonlinear_regression", data, {**NLR, "weighting": "1/y2_obs"})
     best = table(res, "Best-fit values")
     assert param(best, "EC50", "Compound A")["value"] == approx(0.1023829822, 1e-4)
     assert param(best, "EC50", "Compound A")["se"] == approx(0.02466773997, 1e-3)
@@ -173,6 +176,101 @@ def test_nlr_constraints_and_weighting_match_r():
     assert "nothing left" in fail("nonlinear_regression", sample("enzyme_kinetics.csv"),
                                   {"x": "Substrate (mM)", "y": ["Velocity"], "model": "michaelis_menten",
                                    "constraints": "Vmax=100, Km=5"})
+
+
+def test_nlr_profile_likelihood_ci_matches_r_confint():
+    # R: confint(nls(y ~ b + (t-b)/(1+(e/x)^h), CompoundA, ...))   (MASS profile-t method).
+    # Both use the same criterion: SS(profile) = SS_min * (1 + F(0.95; 1, df)/df)  <=>  |tau| = t(0.975; df).
+    res = run("nonlinear_regression", sample("dose_response.csv"), NLR)
+    best = table(res, "Best-fit values")
+    ref = {"Bottom": (-0.13624568829, 6.6509470980), "Top": (95.50465801788, 101.3735012974),
+           "EC50": (0.09848753067, 0.1354388587), "HillSlope": (1.01014480734, 1.4337349703)}
+    for name, (lo, hi) in ref.items():
+        row = param(best, name, "Compound A")
+        assert (row["lo"], row["hi"]) == (approx(lo, 2e-4, 3e-4), approx(hi, 2e-4, 3e-4))
+        assert row["lo"] < row["value"] < row["hi"]
+    # the interval of EC50 is asymmetrical, and derived values transform its limits
+    ec = param(best, "EC50", "Compound A")
+    assert ec["hi"] - ec["value"] > ec["value"] - ec["lo"]
+    log = param(table(res, "Derived values"), "LogEC50", "Compound A")
+    assert (log["lo"], log["hi"]) == (approx(math.log10(ec["lo"])), approx(math.log10(ec["hi"])))
+    assert "0.09849 to 0.1354" in summary(res)
+    notes = next(e for e in res["elements"] if e["type"] == "table" and e["title"] == "Best-fit values")["footnotes"]
+    assert any("profile-likelihood" in n for n in notes)
+    # R: confint(nls(y ~ V*x/(K+x), enzyme, start=list(V=100,K=5)))
+    res = run("nonlinear_regression", sample("enzyme_kinetics.csv"),
+              {"x": "Substrate (mM)", "y": ["Velocity"], "model": "michaelis_menten"})
+    best = table(res, "Best-fit values")
+    assert (param(best, "Vmax")["lo"], param(best, "Vmax")["hi"]) == (approx(114.215320374, 1e-5), approx(122.861990897, 1e-5))
+    assert (param(best, "Km")["lo"], param(best, "Km")["hi"]) == (approx(5.226246037, 1e-4), approx(6.682176239, 1e-4))
+
+
+def test_profile_ci_linear_model_equals_exact_interval_and_handles_undetermined_limits():
+    from analysis_ui.core.curvefit import fit_model
+    rng = np.random.default_rng(8)
+    x = np.arange(12.0)
+    y = 1 + 0.5 * x + rng.normal(0, 1, 12)
+    fit = fit_model("linear", x, y)
+    prof = fit.profile_ci()
+    for name in ("Intercept", "Slope"):          # for a linear model the profile interval is the exact t interval
+        assert prof[name] == approx(fit.ci[name], 1e-6, 1e-8)
+    assert fit.profile_ci(0.99)["Slope"][0] < prof["Slope"][0]
+    # data covering only the bottom of a 4PL: the upper limits of Top / EC50 cannot be found -> NaN, not a crash
+    xs = np.repeat([0.01, 0.1, 1, 10, 100], 2).astype(float)
+    ys = np.array([1, 1.2, 0.9, 1.1, 1.0, 1.05, 1.3, 1.2, 2.0, 2.1])
+    prof = fit_model("4pl", xs, ys).profile_ci()
+    assert math.isnan(prof["EC50"][1]) and math.isnan(prof["Top"][1])
+    res = run("nonlinear_regression", wire(x=xs, y=ys), {"x": "x", "y": ["y"]})
+    assert param(table(res, "Best-fit values"), "Top")["hi"] is None
+    # one-parameter model (everything else fixed)
+    f1 = fit_model("michaelis_menten", x[1:], 10 * x[1:] / (3 + x[1:]) + rng.normal(0, 0.2, 11), fixed={"Vmax": 10})
+    lo, hi = f1.profile_ci()["Km"]
+    assert lo < f1.params["Km"] < hi and (lo, hi) == approx(f1.ci["Km"], 0.05)
+
+
+def test_nlr_weighting_by_fitted_y_matches_r_irls():
+    # R: IRLS — repeat nls(y ~ V*x/(K+x), weights = 1/fitted^2) (or 1/fitted) until the coefficients stop changing
+    opts = {"x": "Substrate (mM)", "y": ["Velocity"], "model": "michaelis_menten", "ci_method": "asymptotic"}
+    best = table(run("nonlinear_regression", sample("enzyme_kinetics.csv"), {**opts, "weighting": "1/y2"}), "Best-fit values")
+    assert (param(best, "Vmax")["value"], param(best, "Vmax")["se"]) == (approx(114.026640492, 1e-6), approx(5.0324323998, 1e-5))
+    assert (param(best, "Km")["value"], param(best, "Km")["se"]) == (approx(5.178175831, 1e-6), approx(0.3999516865, 1e-5))
+    best = table(run("nonlinear_regression", sample("enzyme_kinetics.csv"), {**opts, "weighting": "1/y"}), "Best-fit values")
+    assert (param(best, "Vmax")["value"], param(best, "Vmax")["se"]) == (approx(117.152963104, 1e-6), approx(2.9470191457, 1e-5))
+    assert (param(best, "Km")["value"], param(best, "Km")["se"]) == (approx(5.643441011, 1e-6), approx(0.3556745285, 1e-5))
+    # 4PL, relative weighting (same R loop)
+    res = run("nonlinear_regression", sample("dose_response.csv"), {**NLR, "weighting": "1/y2"})
+    best = table(res, "Best-fit values")
+    assert param(best, "EC50", "Compound A")["value"] == approx(0.1022780017, 1e-4)
+    assert param(best, "EC50", "Compound A")["se"] == approx(0.0234950860, 1e-3)
+    assert param(best, "Bottom", "Compound A")["value"] == approx(4.2294857072, 1e-4)
+    # 1/SD² from replicates: equals an explicitly weighted scipy fit
+    from scipy.optimize import curve_fit
+    d = frame("enzyme_kinetics.csv")
+    sd = d.groupby("Substrate (mM)")["Velocity"].transform("std").to_numpy()
+    popt, pcov = curve_fit(lambda x, v, k: v * x / (k + x), d["Substrate (mM)"], d["Velocity"], p0=[100, 5], sigma=sd)
+    best = table(run("nonlinear_regression", sample("enzyme_kinetics.csv"), {**opts, "weighting": "1/sd2"}), "Best-fit values")
+    assert (param(best, "Vmax")["value"], param(best, "Km")["value"]) == (approx(popt[0], 1e-6), approx(popt[1], 1e-6))
+    assert param(best, "Km")["se"] == approx(math.sqrt(pcov[1, 1]), 1e-5)
+    assert "replicate" in fail("nonlinear_regression", wire(x=np.arange(1.0, 9), y=np.arange(1.0, 9) ** 0.5),
+                               {**opts, "x": "x", "y": ["y"], "weighting": "1/sd2"})
+    assert "individual replicates" in fail("nonlinear_regression", sample("enzyme_kinetics.csv"),
+                                           {**opts, "weighting": "1/sd2", "replicates": "means"})
+
+
+def test_nlr_aicc_with_constrained_second_model():
+    from analysis_ui.core.curvefit import fit_model
+    d = frame("dose_response.csv")
+    a = d[d["Compound"] == "Compound A"]
+    free = fit_model("4pl", a[X_DR], a[Y_DR])
+    fixed = fit_model("4pl_log", np.log10(a[X_DR]), a[Y_DR], fixed={"Bottom": 0, "Top": 100})
+    assert fixed.k == 2 and fixed.params["LogEC50"] == approx(math.log10(0.1101387031), 1e-5)
+    opts = {"x": X_DR, "y": [Y_DR], "group": "Compound", "compare": "aicc", "model2": "3pl", "constraints2": "Bottom=0"}
+    res = run("nonlinear_regression", sample("dose_response.csv"), opts)
+    row = param(table(res, "Comparison of models"), "Compound A", key="dataset")
+    ref = fit_model("3pl", a[X_DR], a[Y_DR], fixed={"Bottom": 0})
+    assert row["a1"] == approx(free.aicc) and row["a2"] == approx(ref.aicc)
+    assert ref.aicc == approx(30 * math.log(ref.ss_res / 30) + 2 * 3 + 2 * 3 * 4 / (30 - 3 - 1))      # K = 2 + 1
+    assert "not a parameter" in fail("nonlinear_regression", sample("dose_response.csv"), {**opts, "constraints2": "HillSlope=1"})
 
 
 def test_nlr_michaelis_menten_and_aicc():
@@ -347,6 +445,26 @@ def test_standard_curve_linear_inverse_prediction():
     assert rows[0]["note"] == "" and "Extrapolated" in rows[2]["note"]
     assert "Standard curve" in plots(res)
     assert "3 fell within" in summary(res)
+
+
+def test_standard_curve_ci_with_measurement_scatter():
+    conc = np.array([0, 0, 1, 1, 2, 2, 4, 4, 8, 8.0])
+    sig = 0.1 + 0.25 * conc + np.random.default_rng(5).normal(0, 0.02, 10)
+    lr = stats.linregress(conc, sig)
+    opts = {"x": "c", "y": "s", "model": "linear", "unknown_values": "0.9"}
+    narrow = table(run("interpolate_standard_curve", wire(c=conc, s=sig), opts), "Interpolated values")[0]
+    wide = table(run("interpolate_standard_curve", wire(c=conc, s=sig), {**opts, "ci_kind": "prediction"}), "Interpolated values")[0]
+    assert wide["x"] == narrow["x"] and wide["lo"] < narrow["lo"] < narrow["x"] < narrow["hi"] < wide["hi"]
+    # classical inverse-prediction (Fieller) limits for a single new measurement: roots of
+    # (y0 - a - b x)^2 = t^2 s^2 (1 + 1/n + (x - xbar)^2 / Sxx)
+    n, xbar, sxx = 10, conc.mean(), ((conc - conc.mean()) ** 2).sum()
+    s2 = ((sig - lr.intercept - lr.slope * conc) ** 2).sum() / 8
+    t2 = stats.t.ppf(0.975, 8) ** 2
+    A = lr.slope ** 2 - t2 * s2 / sxx
+    B = -2 * lr.slope * (0.9 - lr.intercept) + 2 * t2 * s2 * xbar / sxx
+    C = (0.9 - lr.intercept) ** 2 - t2 * s2 * (1 + 1 / n + xbar ** 2 / sxx)
+    roots = sorted(np.roots([A, B, C]).real)
+    assert (wide["lo"], wide["hi"]) == (approx(roots[0], 1e-5), approx(roots[1], 1e-5))
 
 
 def test_standard_curve_4pl_unknown_column_and_flags():
@@ -1145,20 +1263,25 @@ def test_power_survival_schoenfeld():
     assert "greater than zero" in fail("power_survival", None, {"effect_mode": "medians", "median1": 0})
 
 
-def test_power_correlation():
+def test_power_correlation_matches_pwr():
+    from analysis_ui.analyses.planning import correlation_power
     res = run("power_correlation", None, {})
     rows = table(res, "Sample size and power: correlation")
-    exact = ((stats.norm.ppf(0.975) + stats.norm.ppf(0.8)) / math.atanh(0.3)) ** 2 + 3
-    assert kv(rows, "Required sample size") == math.ceil(exact) == 85
-    # R: pwr.r.test(r=0.3, power=0.8)$n = 84.07 (exact method) — the Fisher approximation is within one subject
-    assert abs(exact - 84.07363978) < 1
-    assert kv(rows, "Actual power") >= 0.8
-    rows = table(run("power_correlation", None, {"solve_for": "power", "n": 85, "r": -0.3}), "Sample size")
-    z = math.atanh(0.3) * math.sqrt(82)
-    assert kv(rows, "Power") == approx(stats.norm.sf(1.959964 - z) + stats.norm.cdf(-1.959964 - z), 1e-6)
+    # R: pwr.r.test(r=0.3, power=0.8)$n = 84.07363978
+    assert kv(rows, "Required sample size") == 85
+    assert "84.07" in next(r["text"] for r in rows if r["item"].startswith("Required sample size"))
+    assert 0.8 <= kv(rows, "Actual power") < 0.81
+    assert "85 subjects" in summary(res)
+    # R: pwr.r.test(r=0.3, n=50)$power = 0.5715558419 ; the sign of r does not matter
+    rows = table(run("power_correlation", None, {"solve_for": "power", "n": 50, "r": -0.3}), "Sample size")
+    assert kv(rows, "Power") == approx(0.5715558419, 1e-8)
+    # R: pwr.r.test(r=-0.2, n=100, sig.level=0.01)$power = 0.2819305149
+    assert correlation_power(-0.2, 100, 0.01) == approx(0.2819305149, 1e-8)
+    # R: pwr.r.test(r=0.5, power=0.9, alternative="greater")$n = 30.49089715
+    rows = table(run("power_correlation", None, {"tails": "one", "r": 0.5, "power": 0.9}), "Sample size")
+    assert kv(rows, "Required sample size") == 31
+    assert "30.49" in next(r["text"] for r in rows if r["item"].startswith("Required sample size"))
     assert "not zero" in fail("power_correlation", None, {"r": 0})
-    rows = table(run("power_correlation", None, {"tails": "one", "r": 0.5}), "Sample size")
-    assert kv(rows, "Required sample size") == math.ceil(((stats.norm.ppf(0.95) + stats.norm.ppf(0.8)) / math.atanh(0.5)) ** 2 + 3)
 
 
 # =========================================================== cross-cutting

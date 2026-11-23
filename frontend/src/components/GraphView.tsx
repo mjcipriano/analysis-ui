@@ -5,6 +5,7 @@ import { download, safeName, svgUrl } from '../format'
 import { graphSpec, useGraphRunner, wireForItem } from '../runner'
 import { useStore } from '../store'
 import type { GraphDef, GraphItem, Palette, Sheet } from '../types'
+import { AnnotationLayer, AnnotationTool } from './AnnotationLayer'
 import { OptionsForm } from './OptionsForm'
 import { EditableText, Icon, MenuButton, Modal, Spinner } from './ui'
 
@@ -121,6 +122,7 @@ export function GraphView({ item }: { item: GraphItem }) {
   const stage = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 800, h: 600 })
   const [focus, setFocus] = useState<{ name: string; nonce: number } | null>(null)
+  const [tool, setTool] = useState<AnnotationTool>(null)
 
   useLayoutEffect(() => {
     const el = stage.current
@@ -228,6 +230,15 @@ export function GraphView({ item }: { item: GraphItem }) {
               <PalettePicker palettes={catalog.colormaps} value={item.options.colormap} onPick={(id) => setOptions(item.id, { colormap: id })} />
             </div>
           )}
+          {has('annotations') && (
+            <div className="tool">
+              <span className="tool-label">Annotate</span>
+              <div className="segmented">
+                <button className={tool === 'text' ? 'on' : ''} title="Click on the graph to add text" onClick={() => setTool(tool === 'text' ? null : 'text')}>T Text</button>
+                <button className={tool === 'arrow' ? 'on' : ''} title="Drag on the graph to draw an arrow" onClick={() => setTool(tool === 'arrow' ? null : 'arrow')}>↗ Arrow</button>
+              </div>
+            </div>
+          )}
           <div className="tool grow" />
           <div className="tool">
             <div className="segmented">
@@ -260,6 +271,10 @@ export function GraphView({ item }: { item: GraphItem }) {
               style={{ width: natW * scale, height: natH * scale }} onDoubleClick={jumpTo}
               title="Double-click the title, an axis or the data to edit it">
               <img src={svgUrl(item.svg)} alt={item.name} draggable={false} style={{ width: '100%', height: '100%' }} />
+              {has('annotations') && (
+                <AnnotationLayer items={Array.isArray(item.options.annotations) ? item.options.annotations : []} tool={tool}
+                  onChange={(next) => setOptions(item.id, { annotations: next })} onToolDone={() => setTool(null)} />
+              )}
             </div>
           )}
           {sheet && !item.svg && (item.status === 'idle' || item.status === 'running') && <div className="empty-state"><Spinner size={22} /><p>Drawing…</p></div>}

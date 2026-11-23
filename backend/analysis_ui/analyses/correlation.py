@@ -9,8 +9,11 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from ..core import analysis, opt, Context, Results, AnalysisError, new_figure, COLORS, stars, fmt_p
-from .descriptive import conf_opt, conf_level, pct, fnum, p_text, is_constant, parse_numbers
+from functools import lru_cache
+from itertools import permutations
+
+from ..core import analysis, opt, Context, Results, AnalysisError, new_figure, COLORS, stars, fmt_p, p_text
+from .descriptive import conf_opt, conf_level, pct, fnum, is_constant, parse_numbers
 
 CAT = "Correlation & regression"
 
@@ -24,10 +27,35 @@ _NAME = {"pearson": "Pearson correlation", "spearman": "Spearman rank correlatio
 # Correlation
 # --------------------------------------------------------------------------
 
+SPEARMAN_EXACT_MAX_N = 9
+
+
+@lru_cache(maxsize=None)
+def _spearman_null(n: int) -> tuple[np.ndarray, np.ndarray]:
+    """Exact null distribution of D = Σ(rank difference)² for n untied pairs:
+    (sorted distinct values of D, number of permutations giving each)."""
+    base = np.arange(n)
+    perms = np.array(list(permutations(range(n))), dtype=np.int16)
+    d = ((perms - base) ** 2).sum(axis=1)
+    return np.unique(d, return_counts=True)
+
+
+def spearman_exact_p(x: np.ndarray, y: np.ndarray) -> float:
+    """Exact two-tailed P value of Spearman's ρ (no ties): twice the smaller
+    tail of the permutation distribution of Σd², capped at 1 (as in R)."""
+    n = len(x)
+    d_obs = float(np.sum((stats.rankdata(x) - stats.rankdata(y)) ** 2))
+    vals, counts = _spearman_null(n)
+    total = counts.sum()
+    lower = counts[vals <= d_obs + 1e-9].sum() / total      # ρ at least this positive
+    upper = counts[vals >= d_obs - 1e-9].sum() / total      # ρ at least this negative
+    return float(min(1.0, 2 * min(lower, upper)))
+
+
 def corr_pair(x: np.ndarray, y: np.ndarray, method: str, conf: float = 0.95) -> dict:
     """Correlation of two complete vectors with Fisher-z confidence interval."""
     n = len(x)
-    out = {"n": n, "r": math.nan, "lo": math.nan, "hi": math.nan, "p": math.nan, "r2": math.nan}
+    out = {"n": n, "r": math.nan, "lo": math.nan, "hi": math.nan, "p": math.nan, "r2": math.nan, "exact": False}
     if n < 3 or is_constant(x) or is_constant(y):
         return out
     with warnings.catch_warnings():
@@ -43,6 +71,9 @@ def corr_pair(x: np.ndarray, y: np.ndarray, method: str, conf: float = 0.95) -> 
             se = math.sqrt(0.437 / (n - 4)) if n > 4 else math.nan
     r = float(res.statistic)
     out.update(r=r, p=float(res.pvalue), r2=r * r)
+    if (method == "spearman" and n <= SPEARMAN_EXACT_MAX_N
+            and len(np.unique(x)) == n and len(np.unique(y)) == n):
+        out.update(p=spearman_exact_p(x, y), exact=True)
     if np.isfinite(se) and abs(r) < 1:
         z = math.atanh(r)
         zc = stats.norm.ppf(0.5 + conf / 2)
@@ -92,8 +123,9 @@ def correlation(ctx: Context) -> Results:
         "pearson": "Pearson correlation; two-tailed P value from the t distribution with n − 2 df. "
                    f"{cl} CI by Fisher's z transformation. Assumes both variables are sampled from Gaussian "
                    "distributions and are linearly related.",
-        "spearman": "Spearman rank correlation (tied values get average ranks); two-tailed P value from the t "
-                    f"approximation. Approximate {cl} CI by Fisher's z transformation with the Fieller correction.",
+        "spearman": "Spearman rank correlation (tied values get average ranks); the two-tailed P value is exact "
+                    f"(all permutations of the ranks) when n ≤ {SPEARMAN_EXACT_MAX_N} and there are no ties, otherwise "
+                    f"from the t approximation with n − 2 df. Approximate {cl} CI by Fisher's z transformation with the Fieller correction.",
         "kendall": "Kendall's τ-b (adjusted for ties); two-tailed P value (exact for small samples without ties, "
                    f"otherwise normal approximation). Approximate {cl} CI by Fisher's z with the Fieller correction.",
     }[method]
@@ -114,8 +146,13 @@ def correlation(ctx: Context) -> Results:
         cols += [("p", "P value (two-tailed)", "p"), ("stars", "P value summary", "text"),
                  ("sig", f"Significant (α = {alpha:g})?", "text"), ("n", "Number of XY pairs", "int")]
         t = r.table(_NAME[method], cols)
+        exact = res.pop("exact")
         t.add_row(pair=f"{a} vs. {b}", stars=stars(res["p"]), sig="Yes" if res["p"] < alpha else "No", **res)
         t.note(method_note)
+        if method == "spearman":
+            t.note("This P value is exact." if exact else
+                   "This P value is from the t approximation"
+                   + (" (tied values present)." if res["n"] <= SPEARMAN_EXACT_MAX_N else f" (n > {SPEARMAN_EXACT_MAX_N})."))
         dropped = len(data[a]) - res["n"]
         if dropped:
             t.note(f"{dropped} row(s) with a missing value were excluded.")
@@ -153,6 +190,7 @@ def correlation(ctx: Context) -> Results:
             R[i, i] = 1.0
         for j in range(i + 1, k):
             res, _, _ = pair(names[i], names[j])
+            res.pop("exact")
             R[i, j] = R[j, i] = res["r"]
             P[i, j] = P[j, i] = res["p"]
             N[i, j] = N[j, i] = res["n"]

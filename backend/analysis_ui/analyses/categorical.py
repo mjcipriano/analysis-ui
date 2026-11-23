@@ -13,11 +13,11 @@ import math
 
 import numpy as np
 import pandas as pd
-from scipy import stats
+from scipy import optimize, stats
 from scipy.special import gammaln
 
-from ..core import analysis, opt, Context, Results, AnalysisError, new_figure, COLORS, stars, fmt_p
-from .descriptive import conf_opt, conf_level, pct, fnum, p_text, parse_numbers
+from ..core import analysis, opt, Context, Results, AnalysisError, new_figure, COLORS, stars, fmt_p, p_text
+from .descriptive import conf_opt, conf_level, pct, fnum, parse_numbers
 
 CAT = "Categorical data"
 
@@ -218,30 +218,141 @@ def trend_test(counts: np.ndarray) -> tuple[float, float]:
     return chi2, float(stats.chi2.sf(chi2, 1))
 
 
-def two_by_two(a: int, b: int, c: int, d: int, conf: float) -> dict:
+def koopman_ci(x1: int, n1: int, x2: int, n2: int, conf: float = 0.95) -> tuple[float, float]:
+    """Koopman (1984) asymptotic score interval for the ratio of two
+    independent binomial proportions (x1/n1) / (x2/n2)."""
+    if x1 == 0 and x2 == 0:
+        return math.nan, math.nan
+    z2 = stats.norm.ppf(0.5 + conf / 2) ** 2
+    N = n1 + n2
+
+    def score(log_phi):
+        phi = math.exp(log_phi)
+        # maximum-likelihood estimates of p1, p2 under the constraint p1 = phi * p2
+        A = N * phi
+        B = -(n1 * phi + x1 + n2 + x2 * phi)
+        C = x1 + x2
+        p2 = min(1.0, 2 * C / (-B + math.sqrt(max(0.0, B * B - 4 * A * C))))   # stable form of the smaller root
+        p1 = min(1.0, p2 * phi)
+        # score statistic, written per unit of phi so that it stays finite for very large phi
+        var = p1 * (1 - p1) / n1 / (phi * phi) + p2 * (1 - p2) / n2
+        diff = x1 / n1 / phi - x2 / n2
+        if var <= 1e-300:
+            return 0.0 if abs(diff) < 1e-9 else math.inf
+        return diff * diff / var
+
+    f = lambda lp: score(lp) - z2  # noqa: E731
+    wide = 40.0
+    if x1 == 0:
+        lo = 0.0
+    else:
+        centre = math.log((x1 / n1) / (x2 / n2)) if x2 > 0 else wide
+        lo = math.exp(optimize.brentq(f, -wide, centre, xtol=1e-13)) if f(-wide) > 0 > f(centre) else math.nan
+    if x2 == 0:
+        hi = math.inf
+    else:
+        centre = math.log((x1 / n1) / (x2 / n2)) if x1 > 0 else -wide
+        hi = math.exp(optimize.brentq(f, centre, wide, xtol=1e-13)) if f(wide) > 0 > f(centre) else math.nan
+    return lo, hi
+
+
+def baptista_pike_ci(a: int, b: int, c: int, d: int, conf: float = 0.95, midp: bool = False) -> tuple[float, float]:
+    """Baptista & Pike (1977) exact conditional interval for the odds ratio.
+
+    For a candidate odds ratio θ the count ``a`` follows Fisher's noncentral
+    hypergeometric distribution given the margins. The two-sided P value is
+    the total probability of all tables that are no more likely than the
+    observed one (minus half the observed table's probability for the mid-P
+    variant); the interval runs from the smallest to the largest θ that is
+    not rejected at level 1 − conf."""
+    alpha = 1 - conf
+    r1, r2, c1 = a + b, c + d, a + c
+    lo_x, hi_x = max(0, c1 - r2), min(r1, c1)
+    if lo_x == hi_x:
+        return math.nan, math.nan
+    xs = np.arange(lo_x, hi_x + 1)
+    logw = (gammaln(r1 + 1) - gammaln(xs + 1) - gammaln(r1 - xs + 1)
+            + gammaln(r2 + 1) - gammaln(c1 - xs + 1) - gammaln(r2 - c1 + xs + 1))
+    k = a - lo_x
+
+    def pvalue(log_theta):
+        lt = np.atleast_1d(np.asarray(log_theta, float))[:, None]
+        lp = logw[None, :] + xs[None, :] * lt
+        lp -= lp.max(axis=1, keepdims=True)
+        pm = np.exp(lp)
+        pm /= pm.sum(axis=1, keepdims=True)
+        obs = pm[:, [k]]
+        p = np.where(pm <= obs * (1 + 1e-7), pm, 0.0).sum(axis=1)
+        if midp:
+            p = p - 0.5 * obs[:, 0]
+        return p
+
+    grid = np.linspace(-35.0, 35.0, 2801 if len(xs) <= 4000 else 701)
+    if a * d > 0 and b * c > 0:               # make sure the sample odds ratio itself is examined
+        grid = np.unique(np.append(grid, math.log(a * d / (b * c))))
+    ok = pvalue(grid) > alpha
+    if not ok.any():                      # can only happen for the mid-P variant with extreme tables
+        return math.nan, math.nan
+
+    def refine(inside, outside):
+        for _ in range(60):
+            mid = 0.5 * (inside + outside)
+            if pvalue(mid)[0] > alpha:
+                inside = mid
+            else:
+                outside = mid
+        return inside
+
+    first, last = int(np.argmax(ok)), int(len(ok) - 1 - np.argmax(ok[::-1]))
+    lo = 0.0 if (a == lo_x or first == 0) else math.exp(refine(grid[first], grid[first - 1]))
+    hi = math.inf if (a == hi_x or last == len(grid) - 1) else math.exp(refine(grid[last], grid[last + 1]))
+    return lo, hi
+
+
+RR_METHODS = {"koopman": "Koopman asymptotic score", "katz": "Katz log"}
+OR_METHODS = {"baptista_pike": "Baptista–Pike (exact conditional)", "baptista_pike_midp": "Baptista–Pike mid-P",
+              "woolf": "Woolf logit"}
+RD_METHODS = {"newcombe": "Newcombe hybrid score", "wald": "Wald"}
+
+
+def two_by_two(a: int, b: int, c: int, d: int, conf: float, rr_method: str = "koopman",
+               or_method: str = "baptista_pike", rd_method: str = "newcombe") -> dict:
     """Effect sizes of a 2×2 table  [[a, b], [c, d]]  (rows = groups,
     first column = outcome of interest)."""
     z = stats.norm.ppf(0.5 + conf / 2)
     n1, n2 = a + b, c + d
     p1, p2 = a / n1, c / n2
     out = {"p1": p1, "p2": p2, "corrected": False}
-    # relative risk (Katz log method) and odds ratio (Woolf logit method)
-    aa, bb, cc, dd = a, b, c, d
-    if min(a, b, c, d) == 0:
-        aa, bb, cc, dd = a + 0.5, b + 0.5, c + 0.5, d + 0.5
-        out["corrected"] = True
-    rr = (aa / (aa + bb)) / (cc / (cc + dd))
-    se_rr = math.sqrt(1 / aa - 1 / (aa + bb) + 1 / cc - 1 / (cc + dd))
-    out["rr"] = (rr, rr * math.exp(-z * se_rr), rr * math.exp(z * se_rr))
-    orr = (aa * dd) / (bb * cc)
-    se_or = math.sqrt(1 / aa + 1 / bb + 1 / cc + 1 / dd)
-    out["or"] = (orr, orr * math.exp(-z * se_or), orr * math.exp(z * se_or))
-    # risk difference, Newcombe hybrid score interval
-    l1, u1 = ci_wilson(a, n1, conf)
-    l2, u2 = ci_wilson(c, n2, conf)
+    zero = min(a, b, c, d) == 0
+    aa, bb, cc, dd = (a + 0.5, b + 0.5, c + 0.5, d + 0.5) if zero else (a, b, c, d)   # Haldane–Anscombe
+    # relative risk
+    if rr_method == "katz":
+        out["corrected"] |= zero
+        rr = (aa / (aa + bb)) / (cc / (cc + dd))
+        se_rr = math.sqrt(1 / aa - 1 / (aa + bb) + 1 / cc - 1 / (cc + dd))
+        out["rr"] = (rr, rr * math.exp(-z * se_rr), rr * math.exp(z * se_rr))
+    else:
+        rr = p1 / p2 if p2 > 0 else (math.inf if p1 > 0 else math.nan)
+        out["rr"] = (rr, *koopman_ci(a, n1, c, n2, conf))
+    # odds ratio
+    if or_method == "woolf":
+        out["corrected"] |= zero
+        orr = (aa * dd) / (bb * cc)
+        se_or = math.sqrt(1 / aa + 1 / bb + 1 / cc + 1 / dd)
+        out["or"] = (orr, orr * math.exp(-z * se_or), orr * math.exp(z * se_or))
+    else:
+        orr = (a * d) / (b * c) if b * c > 0 else (math.inf if a * d > 0 else math.nan)
+        out["or"] = (orr, *baptista_pike_ci(a, b, c, d, conf, midp=or_method == "baptista_pike_midp"))
+    # risk difference
     rd = p1 - p2
-    rd_lo = rd - math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2)
-    rd_hi = rd + math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2)
+    if rd_method == "wald":
+        se_rd = math.sqrt(p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2)
+        rd_lo, rd_hi = max(-1.0, rd - z * se_rd), min(1.0, rd + z * se_rd)
+    else:
+        l1, u1 = ci_wilson(a, n1, conf)
+        l2, u2 = ci_wilson(c, n2, conf)
+        rd_lo = rd - math.sqrt((p1 - l1) ** 2 + (u2 - p2) ** 2)
+        rd_hi = rd + math.sqrt((u1 - p1) ** 2 + (p2 - l2) ** 2)
     out["rd"] = (rd, rd_lo, rd_hi)
     if rd != 0:
         nnt = 1 / abs(rd)
@@ -322,6 +433,12 @@ def _matrix_table(r: Results, title: str, tab: pd.DataFrame, corner: str, fmt: s
                     help="For 2×k tables whose k categories have a natural order."),
         opt.boolean("effects", "Relative risk, odds ratio, risk difference", True, section="2×2 tables"),
         opt.boolean("diagnostic", "Sensitivity, specificity, predictive values", False, section="2×2 tables"),
+        opt.choice("rr_method", "CI of relative risk", list(RR_METHODS.items()), default="koopman",
+                   section="2×2 tables"),
+        opt.choice("or_method", "CI of odds ratio", list(OR_METHODS.items()), default="baptista_pike",
+                   section="2×2 tables"),
+        opt.choice("rd_method", "CI of risk difference", list(RD_METHODS.items()), default="newcombe",
+                   section="2×2 tables"),
         opt.level("ref_row", "Row of interest (exposed / test positive)", sources=["rows", "labels"],
                   section="2×2 tables"),
         opt.level("event_col", "Column of interest (event / disease)", sources=["cols", "count_cols"],
@@ -433,7 +550,8 @@ def contingency(ctx: Context) -> Results:
         ci = _pick(list(tab.columns), ctx.opt("event_col", ""), "columns")
         t2 = tab.iloc[[ri, 1 - ri], [ci, 1 - ci]]
         a, b, c, d = (int(v_) for v_ in t2.to_numpy().ravel())
-        e = two_by_two(a, b, c, d, conf)
+        rr_m, or_m, rd_m = ctx.opt("rr_method", "koopman"), ctx.opt("or_method", "baptista_pike"), ctx.opt("rd_method", "newcombe")
+        e = two_by_two(a, b, c, d, conf, rr_m, or_m, rd_m)
         r1, r2 = t2.index
         c1, c2 = t2.columns
         cols = [("measure", "Measure", "text"), ("value", "Value", "num"), ("lo", f"{cl} CI lower", "num"),
@@ -444,16 +562,23 @@ def contingency(ctx: Context) -> Results:
                        hi=ci_wilson(a, a + b, conf)[1], method="Wilson")
             ef.add_row(measure=f"Risk in {r2}", value=e["p2"], lo=ci_wilson(c, c + d, conf)[0],
                        hi=ci_wilson(c, c + d, conf)[1], method="Wilson")
-            for key, label, method in (("rr", "Relative risk", "Katz log"), ("or", "Odds ratio", "Woolf logit"),
-                                       ("rd", "Risk difference (attributable risk)", "Newcombe hybrid score"),
+            for key, label, method in (("rr", "Relative risk", RR_METHODS[rr_m]), ("or", "Odds ratio", OR_METHODS[or_m]),
+                                       ("rd", "Risk difference (attributable risk)", RD_METHODS[rd_m]),
                                        ("nnt", "Number needed to treat (or harm)", "from the risk difference")):
                 val, lo, hi = e[key]
                 ef.add_row(measure=label, value=val, lo=lo, hi=hi, method=method)
             ef.note(f"Risks are the proportion of “{c1}” within each row; ratios and differences compare {r1} with {r2}. "
                     "Change the row and column of interest under “2×2 tables”.")
             if e["corrected"]:
-                ef.note("A cell is zero, so 0.5 was added to every cell to compute the relative risk and odds ratio "
+                ef.note("A cell is zero, so 0.5 was added to every cell for the Katz and Woolf formulas "
                         "(Haldane–Anscombe correction).")
+            if min(a, b, c, d) == 0 and (rr_m == "koopman" or or_m != "woolf"):
+                ef.note("A cell is zero: a ratio or a confidence limit that is infinite or undefined is left empty.")
+            if or_m.startswith("baptista"):
+                ef.note("Baptista–Pike: exact interval conditional on the table margins (noncentral hypergeometric "
+                        "distribution); it contains every odds ratio for which the tables no more likely than the "
+                        "observed one have a total probability above 1 − confidence level"
+                        + (", counting only half the probability of the observed table (mid-P)." if or_m.endswith("midp") else "."))
             if not np.isfinite(e["nnt"][1]) and np.isfinite(e["nnt"][0]):
                 ef.note("The CI of the risk difference includes zero, so the CI of the NNT is not bounded "
                         "(it extends to infinity in both directions) and is left empty.")
@@ -676,17 +801,26 @@ def binomial(ctx: Context) -> Results:
 # McNemar
 # --------------------------------------------------------------------------
 
-@analysis(
-    id="mcnemar", name="McNemar's test (paired proportions)", category=CAT,
-    description="Compare two paired yes/no measurements on the same subjects (before/after, two raters, matched pairs).",
-    keywords="mcnemar paired proportions matched binary discordant before after",
-    options=[
-        opt.variable("var1", "First measurement", opt.ANY),
-        opt.variable("var2", "Second measurement", opt.ANY),
-        conf_opt(section="Options"),
-        opt.alpha(section="Options"),
-    ])
-def mcnemar(ctx: Context) -> Results:
+def _mcnemar_typed(ctx: Context) -> tuple[str, str, str, str, int, int, int, int, int]:
+    vals = parse_numbers(ctx.opt("counts", ""), "counts")
+    if len(vals) != 4:
+        raise AnalysisError("Type the four counts of the paired table, separated by commas: both positive, "
+                            "first positive / second negative, first negative / second positive, both negative "
+                            f"({len(vals)} number{'s were' if len(vals) != 1 else ' was'} typed).")
+    if any(v < 0 or abs(v - round(v)) > 1e-9 for v in vals):
+        raise AnalysisError("Counts must be whole numbers that are zero or greater.")
+    a, b, c, d = (int(round(v)) for v in vals)
+    if a + b + c + d == 0:
+        raise AnalysisError("All four counts are zero.")
+    names = [s.strip() for s in str(ctx.opt("names", "")).replace(";", ",").split(",") if s.strip()]
+    if names and len(names) != 4:
+        raise AnalysisError("Type four names (first measurement, second measurement, positive category, "
+                            f"negative category) or leave the names empty ({len(names)} typed).")
+    n1, n2, l1, l2 = names or ["First", "Second", "+", "−"]
+    return n1, n2, l1, l2, a, b, c, d, 0
+
+
+def _mcnemar_raw(ctx: Context) -> tuple[str, str, str, str, int, int, int, int, int]:
     n1, n2 = ctx.var("var1"), ctx.var("var2")
     if n1 == n2:
         raise AnalysisError("Choose two different variables (the two paired measurements).")
@@ -708,6 +842,29 @@ def mcnemar(ctx: Context) -> Results:
     b = int(np.sum((v1 == l1) & (v2 == l2)))
     c = int(np.sum((v1 == l2) & (v2 == l1)))
     d = int(np.sum((v1 == l2) & (v2 == l2)))
+    return n1, n2, l1, l2, a, b, c, d, dropped
+
+
+@analysis(
+    id="mcnemar", name="McNemar's test (paired proportions)", category=CAT,
+    description="Compare two paired yes/no measurements on the same subjects (before/after, two raters, matched pairs).",
+    keywords="mcnemar paired proportions matched binary discordant before after",
+    options=[
+        opt.choice("data_form", "Data are", [("raw", "Two variables (one subject per row)"),
+                                             ("counts", "Four counts typed here")], default="raw", section="Data"),
+        opt.variable("var1", "First measurement", opt.ANY, section="Data", visible={"data_form": "raw"}),
+        opt.variable("var2", "Second measurement", opt.ANY, section="Data", visible={"data_form": "raw"}),
+        opt.text("counts", "Counts: both +, first + / second −, first − / second +, both −", "",
+                 placeholder="e.g. 59, 6, 16, 80", section="Data", visible={"data_form": "counts"},
+                 help="The four cells of the paired 2×2 table, row by row."),
+        opt.text("names", "Names: first measurement, second measurement, +, − (optional)", "",
+                 placeholder="e.g. Before, After, Yes, No", section="Data", visible={"data_form": "counts"}),
+        conf_opt(section="Options"),
+        opt.alpha(section="Options"),
+    ])
+def mcnemar(ctx: Context) -> Results:
+    read = _mcnemar_typed if ctx.opt("data_form", "raw") == "counts" else _mcnemar_raw
+    n1, n2, l1, l2, a, b, c, d, dropped = read(ctx)
     n = a + b + c + d
     conf = conf_level(ctx)
     alpha = float(ctx.opt("alpha", 0.05))

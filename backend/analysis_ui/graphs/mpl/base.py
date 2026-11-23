@@ -239,6 +239,29 @@ def build_rc(fonts: dict, theme: dict, editable: bool) -> dict:
     return rc
 
 
+class _Hooks(list):
+    """Deferred drawing steps. Each hook remembers the panel (axes, frames,
+    bracket tops ...) that was current when it was queued, so drawers can keep
+    writing ``p.ax`` and still work when a graph is split into facets."""
+
+    def __init__(self, plot):
+        super().__init__()
+        self.plot = plot
+
+    def append(self, fn):
+        p = self.plot
+        state = p._state()
+
+        def run():
+            saved = p._state()
+            p._set_state(state)
+            try:
+                fn()
+            finally:
+                p._set_state(saved)
+        super().append(run)
+
+
 # ====================================================================== Plot
 class Plot:
     def __init__(self, payload: dict):
@@ -267,7 +290,13 @@ class Plot:
         self.legend_kw: dict = {}
         self.legend = None
         self.legend_pos = "none"
-        self.hooks: tuple[list, list, list] = ([], [], [])
+        self.hooks: tuple[list, list, list] = (_Hooks(self), _Hooks(self), _Hooks(self))
+        self.faceted = False                         # True while drawing a multi-panel graph
+        self.full_frames = self.frames               # unfiltered frames (facets filter self.frames)
+        self._axis_cfg: dict = {}                    # per panel: displayed axis -> (scale, tick step)
+        self._sup: dict = {}                         # shared axis titles of a faceted graph
+        self._grid = None                            # facet grid description
+        self._measure = False
         self.placer = None                           # callable(l, b, r, t) in px -> positions the axes
         self.title_span = "axes"
         self.tops: list[tuple[float, float]] = []    # (category position, highest drawn value)
@@ -275,6 +304,15 @@ class Plot:
         self._inner = None
 
     # ------------------------------------------------------------ small helpers
+    _STATE = ("ax", "tops", "scales", "_axis_cfg", "frames", "computed")
+
+    def _state(self) -> tuple:
+        return tuple(getattr(self, k) for k in self._STATE)
+
+    def _set_state(self, state: tuple):
+        for k, v in zip(self._STATE, state):
+            setattr(self, k, v)
+
     @property
     def renderer(self):
         if self._renderer is None:
@@ -408,6 +446,9 @@ class Plot:
         y = self.labels.get("y", "") if y is None else y
         if self.flip:
             x, y = y, x
+        if self.faceted:                             # one shared title per axis, placed by the layout
+            self._sup = {"x": x or "", "y": y or ""}
+            return
         ax.set_xlabel(x or "")
         ax.set_ylabel(y or "")
 
@@ -564,6 +605,7 @@ class Plot:
         (ax.set_xlim if which == "x" else ax.set_ylim)(v0, v1)
         if ax is self.ax:
             self.scales[which] = scale
+            self._axis_cfg[which] = (scale, step)
         self._ticks(axis, scale, v0, v1, step)
         if which == "x" and prefix is not None:
             angle = str(o.get("x_tick_angle") or "auto")
@@ -828,12 +870,24 @@ class Plot:
                 T -= ext.height + gap * 0.8
             else:
                 B += ext.height + gap * 0.8
+        Lg, Bg, Rg, Tg = L, B, R, T                  # legend anchors sit outside the shared axis titles
+        supx, supy = self._texts.get("supx"), self._texts.get("supy")
+        if supx is not None:
+            B += supx.get_window_extent(r).height + 0.45 * base
+        if supy is not None:
+            L += supy.get_window_extent(r).width + 0.45 * base
         min_w, min_h = 0.25 * fw, 0.25 * fh
         inner = self._inner or (L + 4 * base, B + 3 * base, R - base, T - base)
-        for _ in range(4):
+        for it in range(4):
+            self._measure = it < 2                   # facet grids measure their panels on the first two rounds
             self.placer(*inner)
             box = self._axes_box()
-            tight = Bbox.union([b for b in (ax.get_tightbbox(r) for ax in self.axes) if b is not None] or [box])
+            if self._grid is not None:               # panels were measured by the grid placer: reuse
+                tight = Bbox.union([Bbox.from_extents(ax.bbox.x0 - o[0], ax.bbox.y0 - o[1], ax.bbox.x1 + o[2],
+                                                      ax.bbox.y1 + o[3])
+                                    for ax, o in zip(self.axes, self._grid["overhang"])])
+            else:
+                tight = Bbox.union([b for b in (ax.get_tightbbox(r) for ax in self.axes) if b is not None] or [box])
             ml, mb = max(box.x0 - tight.x0, 0), max(box.y0 - tight.y0, 0)
             mr, mt = max(tight.x1 - box.x1, 0), max(tight.y1 - box.y1, 0)
             l, b_, r_, t = L + ml, B + mb, R - mr, T - mt
@@ -847,8 +901,13 @@ class Plot:
             if done:
                 break
         self._inner = inner
+        self._measure = False
         self.placer(*inner)
         box = self._axes_box()
+        if supx is not None:
+            supx.set_position(((box.x0 + box.x1) / 2 / fw, Bg / fh))
+        if supy is not None:
+            supy.set_position((Lg / fw, (box.y0 + box.y1) / 2 / fh))
         span = (box.x0, box.x1) if self.title_span == "axes" else (L, R)
         for key in ("title", "subtitle"):
             art = self._texts.get(key)
@@ -867,8 +926,8 @@ class Plot:
             ext = leg.get_window_extent(r)
             cx = min(max(cx, pad + ext.width / 2), fw - pad - ext.width / 2)
             cy = min(max(cy, pad + ext.height / 2), fh - pad - ext.height / 2)
-            anchor = {"right": (R + gap, cy), "left": (L - gap, cy), "top": (cx, T + gap * 0.8),
-                      "bottom": (cx, B - gap * 0.8)}[pos]
+            anchor = {"right": (Rg + gap, cy), "left": (Lg - gap, cy), "top": (cx, Tg + gap * 0.8),
+                      "bottom": (cx, Bg - gap * 0.8)}[pos]
             leg.set_bbox_to_anchor((anchor[0] / fw, anchor[1] / fh), transform=self.fig.transFigure)
 
     def finish(self):
@@ -878,9 +937,154 @@ class Plot:
             if self.hooks[phase]:
                 for fn in self.hooks[phase]:
                     fn()
+                if phase == 1 and self._grid is not None:
+                    # brackets extended some panels: share the new limits, then redraw the
+                    # brackets (they are sized in pixels) against the final limits
+                    self._share_axes()
+                    for fn in self.hooks[phase]:
+                        fn()
                 self._layout()
         for fn in self.hooks[2]:
             fn()
+        self._annotations()
+
+    # --------------------------------------------------------------- facets
+    def draw_facets(self, draw):
+        """Run ``draw`` once per facet, each time on its own axes with the
+        frames / brackets / fits of that facet, then arrange the panels in a
+        grid with shared axis titles and a single legend."""
+        c = self.computed
+        names = [str(n) for n in c["facets"]]
+        n = len(names)
+        mode = c.get("facet_axes") or "shared"
+        ncols = c.get("facet_cols")
+        if not ncols:
+            # the grid whose panels come closest to a pleasant 5:4 shape
+            ncols = min(range(1, n + 1), key=lambda k: (abs(math.log(
+                (self.W / k) / (self.H / math.ceil(n / k)) / 1.25)), -k))
+        ncols = int(min(max(int(ncols), 1), n))
+        nrows = int(math.ceil(n / ncols))
+        full_frames, full_computed = self.frames, self.computed
+        self.faceted = True
+        panels, legend = [], None
+        f = self.fonts
+        for k, name in enumerate(names):
+            ax = self.ax if k == 0 else self.new_axes()
+            self.ax, self.tops, self.scales, self._axis_cfg = ax, [], {"x": "linear", "y": "linear"}, {}
+            self.frames = {key: df[df["facet"].astype(str).to_numpy() == name].reset_index(drop=True)
+                           if "facet" in df.columns else df for key, df in full_frames.items()}
+            self.computed = dict(full_computed)
+            for key in ("brackets", "fits"):
+                if key in full_computed:
+                    self.computed[key] = [b for b in full_computed[key] or [] if str(b.get("facet")) == name]
+            draw(self)
+            if k == 0:                               # the legend is the same in every panel: keep the first
+                legend = (list(self.legend_items), self.legend_auto, dict(self.legend_kw))
+            else:
+                self.legend_items, self.legend_auto, self.legend_kw = list(legend[0]), legend[1], dict(legend[2])
+            if c.get("facet_labels", True):
+                ax.set_title(name, fontsize=f["tick"] * 1.05, fontweight="bold", color=self.ink, pad=0.4 * f["base"])
+            panels.append(self._state())
+        self._set_state(panels[0])
+        self.frames, self.computed = full_frames, full_computed
+        # "y" in the option means the value / Y role, which is horizontal on flipped graphs
+        share_x_role, share_y_role = mode != "free", mode == "shared"
+        share = {"x": share_y_role if self.flip else share_x_role, "y": share_x_role if self.flip else share_y_role}
+        self._grid = {"panels": panels, "ncols": ncols, "nrows": nrows, "share": share,
+                      "overhang": [(0.0, 0.0, 0.0, 0.0)] * n, "hgap": 0.0, "vgap": 0.0}
+        self._share_axes()
+        for k, st in enumerate(panels):
+            ax = st[0]
+            row, col = divmod(k, ncols)
+            if share["y"] and col > 0:
+                ax.tick_params(axis="y", which="both", labelleft=False)
+                ax.yaxis.offsetText.set_visible(False)
+            if share["x"] and k + ncols < n:         # a panel below shows the labels
+                ax.tick_params(axis="x", which="both", labelbottom=False)
+                ax.xaxis.offsetText.set_visible(False)
+            if c.get("facet_labels", True):
+                self.hooks[0].append(lambda ax=ax, name=names[k]: ax.title.set_text(
+                    self.wrap(name, ax.title.get_fontsize(), max(ax.bbox.width, 30), True)))
+        weight = "bold" if self.theme.get("axis_title_bold") else "normal"
+        kw = dict(fontsize=f["axis_title"], fontweight=weight, color=self.ink)
+        if self._sup.get("x"):
+            self._texts["supx"] = self.fig.text(0.5, 0, self._sup["x"], ha="center", va="bottom", **kw)
+        if self._sup.get("y"):
+            self._texts["supy"] = self.fig.text(0, 0.5, self._sup["y"], ha="left", va="center", rotation=90, **kw)
+        self.placer = self._place_grid
+
+    def _share_axes(self):
+        """Give shared axes of all panels the same limits and ticks."""
+        g = self._grid
+        for which in ("x", "y"):
+            if not g["share"][which]:
+                continue
+            lims = [(st[0].get_xlim() if which == "x" else st[0].get_ylim()) for st in g["panels"]]
+            lo, hi = min(min(l) for l in lims), max(max(l) for l in lims)
+            if lims[0][0] > lims[0][1]:              # inverted (categories on a flipped graph)
+                lo, hi = hi, lo
+            for st in g["panels"]:
+                ax, cfg = st[0], st[3].get(which)
+                (ax.set_xlim if which == "x" else ax.set_ylim)(lo, hi)
+                if cfg is not None:
+                    self._ticks(ax.xaxis if which == "x" else ax.yaxis, cfg[0], min(lo, hi), max(lo, hi), cfg[1])
+
+    def _place_grid(self, l, b, r, t):
+        g = self._grid
+        axes = [st[0] for st in g["panels"]]
+        n, ncols, nrows = len(axes), g["ncols"], g["nrows"]
+        base = self.fonts["base"] * self.px
+        if self._measure:
+            # how far the decorations of every panel stick out of its axes: (left, bottom, right, top)
+            rd = self.renderer
+            over = []
+            for ax in axes:
+                tb, bb = ax.get_tightbbox(rd), ax.bbox
+                over.append((max(bb.x0 - tb.x0, 0), max(bb.y0 - tb.y0, 0), max(tb.x1 - bb.x1, 0),
+                             max(tb.y1 - bb.y1, 0)) if tb is not None else (0.0, 0.0, 0.0, 0.0))
+            g["overhang"] = over
+            cols, rows = [k % ncols for k in range(n)], [k // ncols for k in range(n)]
+            g["hgap"] = (max((o[0] for o, c in zip(over, cols) if c > 0), default=0)
+                         + max((o[2] for o, c in zip(over, cols) if c < ncols - 1), default=0) + 0.9 * base)
+            g["vgap"] = (max((o[1] for k, o in enumerate(over) if k + ncols < n), default=0)
+                         + max((o[3] for o, rw in zip(over, rows) if rw > 0), default=0) + 0.7 * base)
+        w = max((r - l - g["hgap"] * (ncols - 1)) / ncols, 8)
+        h = max((t - b - g["vgap"] * (nrows - 1)) / nrows, 8)
+        for k, ax in enumerate(axes):
+            row, col = divmod(k, ncols)
+            x0, y1 = l + col * (w + g["hgap"]), t - row * (h + g["vgap"])
+            self.set_pos(ax, x0, y1 - h, x0 + w, y1)
+
+    # ---------------------------------------------------------- annotations
+    def _annotations(self):
+        """Free text / arrows / lines in figure fractions from the top-left
+        corner. Drawn last and never part of the layout."""
+        from matplotlib.patches import FancyArrowPatch
+        fig = self.fig
+        for a in self.o.get("_annotations") or []:
+            color = a.get("color") or self.ink
+            try:
+                mcolors.to_rgba(color)
+            except ValueError:
+                color = self.ink
+            x, y = float(a["x"]), 1.0 - float(a["y"])
+            if a.get("kind") == "text":
+                fig.text(x, y, a.get("text", ""), ha=a.get("align") or "center", va="center",
+                         rotation=float(a.get("angle") or 0), rotation_mode="anchor",
+                         fontsize=float(a.get("size") or self.fonts["base"]), color=color,
+                         fontweight="bold" if a.get("bold") else "normal",
+                         fontstyle="italic" if a.get("italic") else "normal", zorder=100)
+            elif a.get("kind") in ("arrow", "line"):
+                x2, y2 = float(a["x2"]), 1.0 - float(a["y2"])
+                lw = float(a.get("width") or 1.2)
+                if a["kind"] == "line" or (x, y) == (x2, y2):
+                    fig.add_artist(Line2D([x, x2], [y, y2], transform=fig.transFigure, color=color, linewidth=lw,
+                                          solid_capstyle="round", zorder=100))
+                else:
+                    fig.add_artist(FancyArrowPatch(
+                        (x, y), (x2, y2), transform=fig.transFigure, arrowstyle="-|>,head_length=0.9,head_width=0.38",
+                        mutation_scale=5.0 + 4.5 * lw, linewidth=lw, color=color, shrinkA=0, shrinkB=0,
+                        joinstyle="miter", capstyle="butt", zorder=100))
 
     # ---------------------------------------------------- significance brackets
     def note_top(self, c: float, v: float):
@@ -891,9 +1095,13 @@ class Plot:
         """Queue significance brackets between category positions (c1, c2, label)."""
         spans = [(min(a, b), max(a, b), str(lab)) for a, b, lab in spans if lab is not None]
         if spans:
-            self.hooks[1].append(lambda: self._draw_brackets(spans))
+            drawn: list = []
+            self.hooks[1].append(lambda: self._draw_brackets(spans, drawn))
 
-    def _draw_brackets(self, spans):
+    def _draw_brackets(self, spans, drawn: list):
+        """``drawn`` holds the artists of a previous run (facets run this twice)."""
+        while drawn:
+            drawn.pop().remove()
         ax, f, px = self.ax, self.fonts, self.px
         scale = self.scales[self.vname]
         fwd, inv = scale_fwd(scale), scale_inv(scale)
@@ -949,14 +1157,15 @@ class Plot:
             size = fs * (1.2 if stars else 1.0)
             xy = self.xy((a + b) / 2, v_line)
             if self.flip:
-                ax.annotate(lab, xy, xytext=(1.5 if not stars else -0.12 * size, 0), textcoords="offset points",
+                art = ax.annotate(lab, xy, xytext=(1.5 if not stars else -0.12 * size, 0), textcoords="offset points",
                             ha="left", va="center", rotation=270, fontsize=size, color=self.ink, zorder=Z_TEXT, annotation_clip=False)
             else:
-                ax.annotate(lab, xy, xytext=(0, 1.5 if not stars else -0.36 * size), textcoords="offset points",
-                            ha="center", va="bottom", fontsize=size, color=self.ink, zorder=Z_TEXT,
-                            annotation_clip=False)
-        self.segments(C0, V0, C1, V1, colors=self.ink, linewidths=lw, zorder=Z_TEXT, capstyle="projecting",
-                      clip_on=False)
+                art = ax.annotate(lab, xy, xytext=(0, 1.5 if not stars else -0.36 * size), textcoords="offset points",
+                                  ha="center", va="bottom", fontsize=size, color=self.ink, zorder=Z_TEXT,
+                                  annotation_clip=False)
+            drawn.append(art)
+        drawn.append(self.segments(C0, V0, C1, V1, colors=self.ink, linewidths=lw, zorder=Z_TEXT,
+                                   capstyle="projecting", clip_on=False))
 
     # ---------------------------------------------------------- point labels
     def label_points(self, x, y, texts, size: float, radius_pt: float = 3.0, color=None,

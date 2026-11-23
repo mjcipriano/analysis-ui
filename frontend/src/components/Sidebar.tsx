@@ -30,7 +30,9 @@ function Row({ active, icon, label, sub, status, onClick, menu, onRename }: {
 export function Sidebar({ onAnalyze, onGraph, onNewData }: { onAnalyze: (s: Sheet) => void; onGraph: (s: Sheet) => void; onNewData: (e: React.MouseEvent) => void }) {
   const sheets = useStore((s) => s.sheets)
   const items = useStore((s) => s.items)
+  const layouts = useStore((s) => s.layouts)
   const selection = useStore((s) => s.selection)
+  const { addLayout, patchLayout, deleteLayout } = useStore.getState()
   const { select, renameSheet, deleteSheet, duplicateSheet, renameItem, deleteItem, duplicateItem } = useStore.getState()
   const activeSheet = (() => {
     if (selection.kind === 'sheet') return sheets.find((s) => s.id === selection.id)
@@ -83,6 +85,16 @@ export function Sidebar({ onAnalyze, onGraph, onNewData }: { onAnalyze: (s: Shee
             onClick={() => select({ kind: 'graph', id: it.id })} onRename={(v) => renameItem(it.id, v)} menu={itemMenu(it)} />
         ))}
         {!graphs.length && <div className="nav-empty">{sheets.length ? 'Click + to make a graph' : 'No graphs yet'}</div>}
+      </div>
+      <div className="nav-section">
+        <div className="nav-head"><span>Figure layouts</span>
+          <button className="icon-btn small" title="Combine graphs into a multi-panel figure" disabled={!graphs.length} onClick={() => addLayout()}><Icon name="plus" size={14} /></button></div>
+        {layouts.map((l) => (
+          <Row key={l.id} icon="layers" label={l.name} status={l.status} active={selection.kind === 'layout' && selection.id === l.id}
+            onClick={() => select({ kind: 'layout', id: l.id })} onRename={(v) => patchLayout(l.id, { name: v })}
+            menu={[{ divider: true }, { label: 'Delete', icon: 'trash', danger: true, onClick: () => deleteLayout(l.id) }]} />
+        ))}
+        {!layouts.length && <div className="nav-empty">{graphs.length ? 'Click + to combine graphs' : 'No layouts yet'}</div>}
       </div>
     </nav>
   )

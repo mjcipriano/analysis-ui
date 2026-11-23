@@ -149,9 +149,12 @@ def lack_of_fit(fit: Fit) -> dict | None:
             "sd_replicates": math.sqrt(ss_pe / df_pe), "sd_lof": math.sqrt(ss_lof / df_lof)}
 
 
-def derived_values(fit: Fit) -> list[dict]:
-    """Quantities computed from the fitted parameters, with 95 % CIs."""
+def derived_values(fit: Fit, ci: dict | None = None) -> list[dict]:
+    """Quantities computed from the fitted parameters, with 95 % CIs.
+
+    ``ci``: the parameter intervals to transform (default: asymptotic)."""
     p, fixed = fit.params, fit.model.fixed
+    ci = fit.ci if ci is None else ci
     names = list(fit.model.params)
     tcrit = stats.t.ppf(0.975, fit.dof) if fit.dof > 0 else float("nan")
     out: list[dict] = []
@@ -163,10 +166,9 @@ def derived_values(fit: Fit) -> list[dict]:
         """Monotone transform of one parameter: transform the CI limits."""
         if param not in p or not valid(p[param]):
             return
-        lo, hi = fit.ci[param]
-        ends = sorted(fn(v) if valid(v) else float("nan") for v in (lo, hi))
-        if any(e != e for e in ends):
-            ends = [float("nan"), float("nan")]
+        ends = [fn(v) if (v == v and valid(v)) else float("nan") for v in ci[param]]
+        if fn(p[param] + (abs(p[param]) * 0.01 or 0.01)) < fn(p[param]):      # decreasing transform
+            ends = ends[::-1]
         out.append({"name": label, "value": fn(p[param]), "lo": ends[0], "hi": ends[1]})
 
     def delta(label, fn):
@@ -208,7 +210,7 @@ def derived_values(fit: Fit) -> list[dict]:
     elif mid == "linear" and val("Slope") not in (None, 0) and val("Intercept") is not None:
         delta("X intercept (−Intercept / Slope)", lambda q: -q["Intercept"] / q["Slope"])
         mono("1 / Slope", "Slope", lambda v: 1 / v, lambda v: v != 0)
-        if out[-1]["lo"] == out[-1]["lo"] and fit.ci["Slope"][0] * fit.ci["Slope"][1] <= 0:
+        if not ci["Slope"][0] * ci["Slope"][1] > 0:
             out[-1]["lo"] = out[-1]["hi"] = float("nan")   # CI of the slope spans zero
     elif mid == "michaelis_menten" and val("Vmax") is not None and val("Km") is not None:
         delta("Vmax / Km", lambda q: q["Vmax"] / q["Km"])
@@ -266,7 +268,26 @@ def _short(name: str) -> str:
 
 
 _X_AXIS = [("auto", "Automatic"), ("linear", "Linear"), ("log", "Logarithmic")]
-_WEIGHTS = [("none", "No weighting"), ("1/y", "Weight by 1/Y"), ("1/y2", "Weight by 1/Y² (relative)")]
+_WEIGHTS = list(curvefit.WEIGHTINGS.items())
+_WEIGHT_NOTES = {
+    "1/y": "Weighted by 1/Y (Poisson weighting). The weights use the fitted Y and are recomputed until they "
+           "stop changing (iteratively reweighted least squares), as in Prism.",
+    "1/y2": "Weighted by 1/Y² (relative weighting). The weights use the fitted Y and are recomputed until they "
+            "stop changing (iteratively reweighted least squares), as in Prism.",
+    "1/y_obs": "Weighted by 1/Y, with weights computed once from the observed Y values.",
+    "1/y2_obs": "Weighted by 1/Y², with weights computed once from the observed Y values.",
+    "1/sd2": "Weighted by 1/SD², where SD is the standard deviation of the replicates at each X.",
+}
+_CI_NOTES = {
+    "profile": "95% CIs are asymmetrical profile-likelihood intervals: each limit is the parameter value at which "
+               "the sum of squares, re-minimised over the other parameters, reaches SS × (1 + F(0.95; 1, df) / df). "
+               "An empty limit could not be determined (the interval is very wide).",
+    "asymptotic": "95% CIs are symmetrical (asymptotic): best-fit value ± t × standard error.",
+}
+
+
+def _ci_of(fit: Fit, method: str) -> dict:
+    return fit.profile_ci() if method == "profile" else fit.ci
 
 
 # ====================================================== nonlinear regression
@@ -283,6 +304,9 @@ _WEIGHTS = [("none", "No weighting"), ("1/y", "Weight by 1/Y"), ("1/y2", "Weight
         opt.choice("model", "Model", curvefit.model_choices(), default="4pl"),
         opt.text("constraints", "Fix parameters to constants", "", placeholder="e.g. Bottom=0, Top=100",
                  section="Fitting", help="Name=value pairs separated by commas."),
+        opt.choice("ci_method", "Confidence intervals", [
+            ("profile", "Asymmetrical (profile likelihood)"), ("asymptotic", "Symmetrical (asymptotic)")],
+            default="profile", section="Fitting"),
         opt.choice("weighting", "Weighting", _WEIGHTS, default="none", section="Fitting"),
         opt.choice("replicates", "Replicates at the same X",
                    [("individual", "Fit every point"), ("means", "Fit the mean at each X")],
@@ -293,6 +317,8 @@ _WEIGHTS = [("none", "No weighting"), ("1/y", "Weight by 1/Y"), ("1/y2", "Weight
             ("aicc", "Compare with a second model (AICc)")], default="none", section="Compare"),
         opt.choice("model2", "Second model", curvefit.model_choices(), default="3pl",
                    section="Compare", visible={"compare": "aicc"}),
+        opt.text("constraints2", "Fix parameters of the second model", "", placeholder="e.g. Bottom=0",
+                 section="Compare", visible={"compare": "aicc"}),
         opt.text("interp_y", "Interpolate X at these Y values", "", placeholder="e.g. 50, 90",
                  section="Interpolate"),
         opt.text("interp_x", "Predict Y at these X values", "", placeholder="e.g. 0.1, 1, 10",
@@ -313,7 +339,10 @@ def nonlinear_regression(ctx: Context) -> Results:
     cmodel = curvefit.constrain_model(model, fixed)
     weighting = ctx.opt("weighting", "none")
     use_means = ctx.opt("replicates") == "means"
+    ci_method = ctx.opt("ci_method", "profile")
     multi = len(sets) > 1
+    if use_means and weighting == "1/sd2":
+        raise AnalysisError("Weighting by 1/SD² needs the individual replicates; choose “Fit every point”.")
 
     r = Results()
     fits: dict[str, Fit] = {}
@@ -359,21 +388,22 @@ def nonlinear_regression(ctx: Context) -> Results:
         ("param", "Parameter", "text"), ("value", "Best-fit value", "num"), ("se", "Std. error", "num"),
         ("lo", "95% CI lower", "num"), ("hi", "95% CI upper", "num")])
     for name, fit in fits.items():
+        ci = _ci_of(fit, ci_method)
         for pn in fit.model.params:
-            t.add_row(dataset=name, param=pn, value=fit.params[pn], se=fit.se[pn],
-                      lo=fit.ci[pn][0], hi=fit.ci[pn][1])
+            t.add_row(dataset=name, param=pn, value=fit.params[pn], se=fit.se[pn], lo=ci[pn][0], hi=ci[pn][1])
         for pn, v in fit.model.fixed.items():
             t.add_row(dataset=name, param=f"{pn} (fixed)", value=v)
-    t.note("Least-squares fit (Levenberg–Marquardt / trust-region). Confidence intervals are symmetrical "
-           "(asymptotic): best-fit value ± t × standard error.")
+    t.note("Least-squares fit (Levenberg–Marquardt / trust-region). " + _CI_NOTES[ci_method])
     if weighting != "none":
-        t.note(f"Weighted by {'1/Y' if weighting == '1/y' else '1/Y²'} (weights computed from the observed Y values).")
+        t.note(_WEIGHT_NOTES[weighting])
+    if weighting != "none" and ci_method == "profile":
+        t.note("For the profile-likelihood intervals the weights of the best fit are held fixed.")
     if use_means:
         t.note("Fitted to the mean Y at each X value.")
 
     # ---- derived
     if ctx.opt("show_derived", True):
-        rows = [(name, d) for name, fit in fits.items() for d in derived_values(fit)]
+        rows = [(name, d) for name, fit in fits.items() for d in derived_values(fit, _ci_of(fit, ci_method))]
         if rows:
             t = r.table("Derived values", ds_col + [
                 ("param", "Quantity", "text"), ("value", "Value", "num"),
@@ -445,7 +475,7 @@ def nonlinear_regression(ctx: Context) -> Results:
     compare = ctx.opt("compare", "none")
     cmp_sentence = ""
     if compare == "shared":
-        cmp_sentence = _compare_shared(r, cmodel, model, fixed, fits, weighting)
+        cmp_sentence = _compare_shared(r, model, fixed, fits, weighting, ci_method)
     elif compare == "aicc":
         cmp_sentence = _compare_aicc(r, ctx, model, fits, weighting, multi)
 
@@ -475,7 +505,7 @@ def nonlinear_regression(ctx: Context) -> Results:
         t.note("95% confidence interval of the curve (delta method), not a prediction interval for new points.")
 
     # ---- summary
-    r.summary(_nlr_summary(model, fits, failed) + (" " + cmp_sentence if cmp_sentence else ""))
+    r.summary(_nlr_summary(model, fits, failed, ci_method) + (" " + cmp_sentence if cmp_sentence else ""))
 
     # ---- plots
     log_x = _use_log_x(ctx.opt("x_axis", "auto"), model, [d[0] for d in data_used.values()])
@@ -524,14 +554,14 @@ def nonlinear_regression(ctx: Context) -> Results:
     return r
 
 
-def _nlr_summary(model, fits: dict[str, Fit], failed: dict) -> str:
+def _nlr_summary(model, fits: dict[str, Fit], failed: dict, ci_method: str = "asymptotic") -> str:
     key = next((k for k in ("EC50", "LogEC50", "Km", "Kd", "K", "k", "Slope") if k in next(iter(fits.values())).params), None)
     parts = []
     for name, fit in fits.items():
         lead = f"{name}: " if len(fits) + len(failed) > 1 else ""
         if key and math.isfinite(fit.se[key]):
-            lo, hi = fit.ci[key]
-            parts.append(f"{lead}{key} = {fit.params[key]:.4g} (95% CI {lo:.4g} to {hi:.4g}), R² = {fit.r2:.4f}")
+            lo, hi = (format(v, ".4g") if v == v else "undetermined" for v in _ci_of(fit, ci_method)[key])
+            parts.append(f"{lead}{key} = {fit.params[key]:.4g} (95% CI {lo} to {hi}), R² = {fit.r2:.4f}")
         else:
             parts.append(f"{lead}R² = {fit.r2:.4f}, Sy.x = {fit.sy_x:.4g}")
     s = f"Fitted “{model.name}”. " + "; ".join(parts) + "."
@@ -540,7 +570,7 @@ def _nlr_summary(model, fits: dict[str, Fit], failed: dict) -> str:
     return s
 
 
-def _compare_shared(r: Results, cmodel, model, fixed, fits: dict[str, Fit], weighting: str) -> str:
+def _compare_shared(r: Results, model, fixed, fits: dict[str, Fit], weighting: str, ci_method: str) -> str:
     if len(fits) < 2:
         r.warn("Comparing curves needs at least two fitted data sets.")
         return ""
@@ -569,8 +599,10 @@ def _compare_shared(r: Results, cmodel, model, fixed, fits: dict[str, Fit], weig
     t2 = r.table("Shared (global) curve: best-fit values", [
         ("param", "Parameter", "text"), ("value", "Best-fit value", "num"), ("se", "Std. error", "num"),
         ("lo", "95% CI lower", "num"), ("hi", "95% CI upper", "num")])
+    gci = _ci_of(glob, ci_method)
     for pn in glob.model.params:
-        t2.add_row(param=pn, value=glob.params[pn], se=glob.se[pn], lo=glob.ci[pn][0], hi=glob.ci[pn][1])
+        t2.add_row(param=pn, value=glob.params[pn], se=glob.se[pn], lo=gci[pn][0], hi=gci[pn][1])
+    t2.note(_CI_NOTES[ci_method])
     if p < 0.05:
         return (f"The data sets are not adequately described by one shared curve: separate curves fit "
                 f"significantly better (F({df1}, {df_sep}) = {F:.3g}, {p_phrase(p)}).")
@@ -583,6 +615,7 @@ def _compare_aicc(r: Results, ctx: Context, model, fits: dict[str, Fit], weighti
     if model2.id == model.id:
         r.warn("The second model is the same as the first; choose a different model to compare.")
         return ""
+    fixed2 = curvefit.parse_constraints(ctx.opt("constraints2", ""), model2)
     ds_col = [("dataset", "Data set", "text")] if multi else []
     t = r.table("Comparison of models (AICc)", ds_col + [
         ("a1", f"AICc: {_short(model.name)}", "num"), ("a2", f"AICc: {_short(model2.name)}", "num"),
@@ -590,7 +623,7 @@ def _compare_aicc(r: Results, ctx: Context, model, fits: dict[str, Fit], weighti
         ("p2", "Probability model 2 is correct", "pct"), ("pref", "Preferred model", "text")])
     sentences = []
     for name, fit in fits.items():
-        f2, err = _try_fit(model2, fit.x, fit.y, weighting)
+        f2, err = _try_fit(model2, fit.x, fit.y, weighting, fixed2)
         if f2 is None or f2.n != fit.n or not math.isfinite(f2.aicc) or not math.isfinite(fit.aicc):
             why = err or ("the two models use different points (X ≤ 0 excluded by one of them)"
                           if f2 is not None and f2.n != fit.n else "too few points to compute AICc")
@@ -603,14 +636,16 @@ def _compare_aicc(r: Results, ctx: Context, model, fits: dict[str, Fit], weighti
         sentences.append(f"{name + ': ' if multi else ''}“{_short(pref.name)}” is preferred "
                          f"({100 * max(p1, 1 - p1):.1f}% probability of being the better model)")
     t.note("Difference = AICc(model 2) − AICc(model 1). Probabilities are Akaike weights, "
-           "exp(−Δ/2) / (1 + exp(−Δ/2)). The lower AICc is preferred; any constraints apply to model 1 only.")
+           "exp(−Δ/2) / (1 + exp(−Δ/2)). The lower AICc is preferred. Fixed parameters do not count towards K."
+           + (" Model 2 was fitted with " + ", ".join(f"{k} = {v:g}" for k, v in fixed2.items()) + " fixed."
+              if fixed2 else ""))
     return ("AICc comparison: " + "; ".join(sentences) + ".") if sentences else ""
 
 
 # ================================================ interpolate standard curve
-def _band_crossings(fit: Fit, y0: float, xhat: float) -> tuple[float, float]:
+def _band_crossings(fit: Fit, y0: float, xhat: float, kind: str = "confidence") -> tuple[float, float]:
     """Inverse-prediction CI: the X values around ``xhat`` where the 95 %
-    confidence band of the curve crosses ``y0``."""
+    confidence (or prediction) band of the curve crosses ``y0``."""
     lo, hi = float(fit.x.min()), float(fit.x.max())
     if fit.model.positive_x:
         grid = np.geomspace(max(lo / 10, 1e-300), hi * 10, 3000)
@@ -618,7 +653,7 @@ def _band_crossings(fit: Fit, y0: float, xhat: float) -> tuple[float, float]:
         pad = (hi - lo) * 0.5
         grid = np.linspace(lo - pad, hi + pad, 3000)
     with np.errstate(all="ignore"):
-        blo, bhi = fit.band(grid)
+        blo, bhi = fit.band(grid, kind=kind)
     below, above = float("nan"), float("nan")
     for band_idx, band in enumerate((blo, bhi)):
         f = band - y0
@@ -627,7 +662,7 @@ def _band_crossings(fit: Fit, y0: float, xhat: float) -> tuple[float, float]:
         for i in np.where(np.diff(np.sign(f)) != 0)[0]:
             try:
                 root = optimize.brentq(
-                    lambda v: float(fit.band([v])[band_idx][0]) - y0, g[i], g[i + 1])
+                    lambda v: float(fit.band([v], kind=kind)[band_idx][0]) - y0, g[i], g[i + 1])
             except (ValueError, RuntimeError):
                 root = float(g[i])
             if root < xhat and not (below > root):
@@ -655,6 +690,10 @@ def _band_crossings(fit: Fit, y0: float, xhat: float) -> tuple[float, float]:
         opt.choice("weighting", "Weighting", _WEIGHTS, default="none", section="Fitting"),
         opt.boolean("show_fit", "Standard-curve parameters", True, section="Output"),
         opt.boolean("show_ci", "95% CI of interpolated values", True, section="Output"),
+        opt.choice("ci_kind", "The CI accounts for", [
+            ("curve", "Uncertainty of the curve only"),
+            ("prediction", "Curve + scatter of a single measurement of the unknown")],
+            default="curve", section="Output", visible={"show_ci": True}),
         opt.boolean("show_plot", "Plot of the standard curve", True, section="Output"),
         opt.choice("x_axis", "X axis", _X_AXIS, default="auto", section="Output"),
     ])
@@ -700,11 +739,15 @@ def interpolate_standard_curve(ctx: Context) -> Results:
             ("lo", "95% CI lower", "num"), ("hi", "95% CI upper", "num")])
         for pn in model.params:
             t.add_row(param=pn, value=fit.params[pn], se=fit.se[pn], lo=fit.ci[pn][0], hi=fit.ci[pn][1])
-        t.note(f"{fit.n} standards, {fit.dof} degrees of freedom, R² = {fit.r2:.4f}, Sy.x = {fit.sy_x:.4g}.")
+        t.note(f"{fit.n} standards, {fit.dof} degrees of freedom, R² = {fit.r2:.4f}, Sy.x = {fit.sy_x:.4g}. "
+               "95% CIs are symmetrical (asymptotic).")
+        if ctx.opt("weighting", "none") != "none":
+            t.note(_WEIGHT_NOTES[ctx.opt("weighting")])
 
     x_lo, x_hi = float(fit.x.min()), float(fit.x.max())
     y_lo, y_hi = float(fit.y.min()), float(fit.y.max())
     want_ci = ctx.opt("show_ci", True) and fit.dof > 0 and np.all(np.isfinite(fit.pcov))
+    ci_kind = ctx.opt("ci_kind", "curve")
     rows = []
     for name, yv in unknowns:
         xv = fit.solve_x(yv)
@@ -713,7 +756,7 @@ def interpolate_standard_curve(ctx: Context) -> Results:
             note = "Out of range: the curve does not reach this signal near the range of the standards"
         else:
             if want_ci:
-                lo, hi = _band_crossings(fit, yv, xv)
+                lo, hi = _band_crossings(fit, yv, xv, "prediction" if ci_kind == "prediction" else "confidence")
             if not x_lo <= xv <= x_hi:
                 note = "Extrapolated: outside the range of the standards"
             elif not y_lo <= yv <= y_hi:
@@ -734,9 +777,15 @@ def interpolate_standard_curve(ctx: Context) -> Results:
         if len(rows) > cap:
             t.note(f"Only the first {cap} of {len(rows)} unknowns are shown.")
         if want_ci:
-            t.note("95% CI by inverse prediction: the X values at which the 95% confidence band of the fitted "
-                   "curve equals the signal. It reflects uncertainty of the curve only, not the measurement "
-                   "error of the unknown itself. An empty limit means the band does not cross the signal.")
+            if ci_kind == "prediction":
+                t.note("95% CI by inverse prediction: the X values at which the 95% prediction band of the fitted "
+                       "curve equals the signal. It combines the uncertainty of the curve with the scatter of the "
+                       "standards around it (Sy.x), treating each unknown as a single measurement with the same "
+                       "scatter. An empty limit means the band does not cross the signal.")
+            else:
+                t.note("95% CI by inverse prediction: the X values at which the 95% confidence band of the fitted "
+                       "curve equals the signal. It reflects uncertainty of the curve only, not the measurement "
+                       "error of the unknown itself. An empty limit means the band does not cross the signal.")
         elif ctx.opt("show_ci", True):
             t.note("Confidence intervals are omitted because the curve has no residual degrees of freedom.")
         ok = sum(1 for row in rows if row["note"] == "")

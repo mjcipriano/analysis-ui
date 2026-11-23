@@ -117,6 +117,85 @@ COLOR_BY = opt.choice("color_by", "Color", [("group", "Each group its own color"
 COLUMN_FEATURES = {"axes", "y_num", "x_cat", "palette", "flip", "legend"}
 
 
+# ================================================================== FACETS
+FACET_OPTS = [
+    opt.variable("facet", "Split into panels by", opt.ANY, required=False, section="Data",
+                 help="Draws one small panel per value of this column."),
+    opt.integer("facet_cols", "Panels per row", None, min=1, max=12, section="Panels", placeholder="auto"),
+    opt.choice("facet_axes", "Panel axes", [("shared", "Same scales in every panel"),
+                                            ("free_y", "Independent Y scales"),
+                                            ("free", "Independent X and Y scales")],
+               default="shared", section="Panels"),
+    opt.boolean("facet_labels", "Show panel titles", True, section="Panels"),
+]
+
+
+def faceted(prep):
+    """Wrap a ``_prep_*`` function so the graph can be split into panels.
+
+    Without a ``facet`` variable the payload is unchanged. With one:
+
+    * every frame gains a ``facet`` factor column (level order = panel order);
+    * ``computed["facets"]`` lists the panel names;
+    * every dict in ``computed["brackets"]`` and ``computed["fits"]`` gains a
+      ``"facet"`` key — statistics are computed separately inside each panel;
+    * ``computed["facet_cols"]`` (int or None = automatic), ``computed["facet_axes"]``
+      ("shared" | "free_y" | "free") and ``computed["facet_labels"]`` (bool).
+    """
+    def wrapped(ctx: Context) -> Prepared:
+        fv = ctx.var("facet", required=False)
+        full = prep(ctx)
+        if not fv:
+            return full
+        f = ctx.factor(fv)
+        levels = [str(l) for l in f.cat.categories]
+        if len(levels) > 30:
+            raise AnalysisError(f"“{fv}” would create {len(levels)} panels; the limit is 30.")
+        frames: dict[str, list[pd.DataFrame]] = {}
+        brackets, fits, used, warnings = [], [], [], list(full.warnings)
+        for lev in levels:
+            mask = (f.astype(object) == lev).to_numpy()
+            sub = Context(ctx.df[mask].reset_index(drop=True), ctx.options)
+            sub._labels = ctx._labels
+            try:
+                part = prep(sub)
+            except AnalysisError as exc:
+                warnings.append(f"Panel “{lev}” was left out: {exc}")
+                continue
+            used.append(lev)
+            for name, df in part.frames.items():
+                df = df.copy()
+                ref = full.frames.get(name)
+                for col in df.columns:        # keep one level order across panels
+                    if isinstance(df[col].dtype, pd.CategoricalDtype) and ref is not None and col in ref.columns \
+                            and isinstance(ref[col].dtype, pd.CategoricalDtype):
+                        cats = [str(c) for c in ref[col].cat.categories]
+                        if set(map(str, df[col].cat.categories)) <= set(cats):
+                            df[col] = pd.Categorical(df[col].astype(str).where(df[col].notna()), categories=cats)
+                df["facet"] = lev
+                frames.setdefault(name, []).append(df)
+            brackets += [dict(b, facet=lev) for b in part.computed.get("brackets", [])]
+            fits += [dict(b, facet=lev) for b in part.computed.get("fits", [])]
+            warnings += [f"{lev}: {w}" for w in part.warnings if w not in full.warnings]
+        if not used:
+            raise AnalysisError(f"None of the panels defined by “{fv}” has enough data to draw.")
+        out = {}
+        for name, parts in frames.items():
+            df = pd.concat(parts, ignore_index=True)
+            df["facet"] = pd.Categorical(df["facet"], categories=used)
+            out[name] = df
+        computed = dict(full.computed)
+        if "brackets" in computed:
+            computed["brackets"] = brackets
+        if "fits" in computed:
+            computed["fits"] = fits
+        computed.update(facets=used, facet_cols=ctx.opt("facet_cols"), facet_axes=ctx.opt("facet_axes", "shared"),
+                        facet_labels=bool(ctx.opt("facet_labels", True)))
+        full.frames, full.computed, full.warnings = out, computed, warnings
+        return full
+    return wrapped
+
+
 # ================================================================== COLUMN
 def _prep_column(ctx: Context, paired: bool = False) -> Prepared:
     """Render types: column_scatter, column_bar, box, violin, raincloud, before_after.
@@ -169,12 +248,13 @@ def _prep_column(ctx: Context, paired: bool = False) -> Prepared:
 
 def _column_data(paired=False):
     return [*opt.group_layout(paired=paired, min_groups=1),
-            opt.choice("sort_groups", "Group order", SORT, default="data", section="Data")]
+            opt.choice("sort_groups", "Group order", SORT, default="data", section="Data"),
+            *copy.deepcopy(FACET_OPTS)]
 
 
 graph(id="column_scatter", name="Scatter dot plot", category="Column",
       description="Every value as a dot, with a line at the mean or median and error bars.",
-      features=COLUMN_FEATURES, prepare=_prep_column,
+      features=COLUMN_FEATURES, prepare=faceted(_prep_column),
       options=[*_column_data(),
                *_point_opts(toggle=False, size=6),
                opt.boolean("show_summary", "Show mean/median line & error bars", True, section="Summary & error bars"),
@@ -185,7 +265,7 @@ graph(id="column_scatter", name="Scatter dot plot", category="Column",
 
 graph(id="column_bar", name="Bar graph", category="Column",
       description="Bars at the mean or median with error bars; optionally overlay the individual points.",
-      features=COLUMN_FEATURES, prepare=_prep_column,
+      features=COLUMN_FEATURES, prepare=faceted(_prep_column),
       options=[*_column_data(), *_bar_opts(), *_summary_opts(error="sem"),
                opt.choice("error_direction", "Error bar direction", [("both", "Both"), ("up", "Up only")],
                           default="both", section="Summary & error bars"),
@@ -193,7 +273,7 @@ graph(id="column_bar", name="Bar graph", category="Column",
 
 graph(id="box", name="Box & whiskers", category="Column",
       description="Median, quartiles and whiskers; optionally overlay the individual points.",
-      features=COLUMN_FEATURES, prepare=_prep_column,
+      features=COLUMN_FEATURES, prepare=faceted(_prep_column),
       options=[*_column_data(),
                opt.choice("whiskers", "Whiskers", [("tukey", "Tukey (1.5 × IQR)"), ("minmax", "Min to max"),
                                                    ("p5_95", "5th–95th percentile"), ("p10_90", "10th–90th percentile")],
@@ -207,7 +287,7 @@ graph(id="box", name="Box & whiskers", category="Column",
 
 graph(id="violin", name="Violin plot", category="Column",
       description="Distribution shape of every group, with optional box, quartiles and points.",
-      features=COLUMN_FEATURES, prepare=_prep_column,
+      features=COLUMN_FEATURES, prepare=faceted(_prep_column),
       options=[*_column_data(),
                opt.choice("violin_inner", "Inside the violin", [("box", "Mini box plot"), ("quartiles", "Quartile lines"),
                                                                ("mean_sd", "Mean ± SD"), ("none", "Nothing")],
@@ -222,7 +302,7 @@ graph(id="violin", name="Violin plot", category="Column",
 
 graph(id="raincloud", name="Raincloud plot", category="Column",
       description="Half violin, box plot and raw points side by side — the full picture of each group.",
-      features=COLUMN_FEATURES, prepare=_prep_column,
+      features=COLUMN_FEATURES, prepare=faceted(_prep_column),
       options=[*_column_data(),
                opt.number("bw_adjust", "Smoothing", 1.0, min=0.1, max=5, step=0.1, section="Cloud"),
                opt.number("fill_alpha", "Fill opacity", 0.6, min=0, max=1, step=0.05, section="Cloud"),
@@ -231,7 +311,7 @@ graph(id="raincloud", name="Raincloud plot", category="Column",
 
 graph(id="before_after", name="Before–after (paired)", category="Column",
       description="Paired values joined by a line for each subject.",
-      features=COLUMN_FEATURES, prepare=lambda ctx: _prep_column(ctx, paired=True),
+      features=COLUMN_FEATURES, prepare=faceted(lambda ctx: _prep_column(ctx, paired=True)),
       options=[*_column_data(paired=True),
                opt.number("line_width", "Line thickness (pt)", 1.0, min=0.1, max=6, step=0.1, section="Lines"),
                opt.number("line_alpha", "Line opacity", 0.6, min=0.05, max=1, step=0.05, section="Lines"),
@@ -334,7 +414,8 @@ def _grouped_data():
             opt.variable("label", "Row labels (X axis categories)", opt.ANY, required=False, section=s,
                          visible={"layout": "wide"}),
             opt.variables("columns", "Subgroups (one column each)", opt.CONTINUOUS, min=1, section=s,
-                          visible={"layout": "wide"})]
+                          visible={"layout": "wide"}),
+            *copy.deepcopy(FACET_OPTS)]
 
 
 GROUPED_FEATURES = {"axes", "y_num", "x_cat", "palette", "flip", "legend"}
@@ -343,7 +424,7 @@ _dodge = opt.number("dodge", "Spacing between subgroups", 0.8, min=0.2, max=1, s
 
 graph(id="grouped_bar", name="Grouped bar graph", category="Grouped",
       description="Bars for every subgroup, side by side or stacked, with error bars.",
-      features=GROUPED_FEATURES, prepare=_prep_grouped,
+      features=GROUPED_FEATURES, prepare=faceted(_prep_grouped),
       options=[*_grouped_data(),
                opt.choice("position", "Arrangement", [("dodge", "Side by side"), ("stack", "Stacked")],
                           default="dodge", section="Layout"), _dodge,
@@ -353,7 +434,7 @@ graph(id="grouped_bar", name="Grouped bar graph", category="Grouped",
 
 graph(id="grouped_box", name="Grouped box plot", category="Grouped",
       description="Box & whiskers for every subgroup within each category.",
-      features=GROUPED_FEATURES, prepare=_prep_grouped,
+      features=GROUPED_FEATURES, prepare=faceted(_prep_grouped),
       options=[*_grouped_data(), _dodge,
                opt.choice("whiskers", "Whiskers", [("tukey", "Tukey (1.5 × IQR)"), ("minmax", "Min to max")],
                           default="tukey", section="Box"),
@@ -363,7 +444,7 @@ graph(id="grouped_box", name="Grouped box plot", category="Grouped",
 
 graph(id="grouped_violin", name="Grouped violin plot", category="Grouped",
       description="Violins for every subgroup within each category.",
-      features=GROUPED_FEATURES, prepare=_prep_grouped,
+      features=GROUPED_FEATURES, prepare=faceted(_prep_grouped),
       options=[*_grouped_data(), _dodge,
                opt.choice("violin_inner", "Inside the violin", [("box", "Mini box plot"), ("quartiles", "Quartile lines"),
                                                                ("none", "Nothing")], default="box", section="Violin"),
@@ -373,7 +454,7 @@ graph(id="grouped_violin", name="Grouped violin plot", category="Grouped",
 
 graph(id="grouped_points", name="Grouped scatter", category="Grouped",
       description="Individual points for every subgroup with mean/median line and error bars.",
-      features=GROUPED_FEATURES, prepare=_prep_grouped,
+      features=GROUPED_FEATURES, prepare=faceted(_prep_grouped),
       options=[*_grouped_data(), _dodge,
                *_point_opts(toggle=False, size=4.5, layout=False),
                opt.number("jitter", "Spread width", 0.08, min=0, max=0.4, step=0.01, section="Points"),
@@ -382,7 +463,7 @@ graph(id="grouped_points", name="Grouped scatter", category="Grouped",
 
 graph(id="interaction_line", name="Interaction (means) plot", category="Grouped",
       description="Group means joined by lines across categories — the classic two-way ANOVA plot.",
-      features=GROUPED_FEATURES, prepare=_prep_grouped,
+      features=GROUPED_FEATURES, prepare=faceted(_prep_grouped),
       options=[*_grouped_data(),
                opt.number("dodge", "Horizontal offset between lines", 0.15, min=0, max=0.8, step=0.05, section="Layout"),
                opt.number("line_width", "Line thickness (pt)", 1.5, min=0.1, max=6, step=0.1, section="Lines"),
@@ -493,6 +574,7 @@ _xy_options = [
     opt.variable("group", "Group into series by", opt.ANY, required=False, section="Data"),
     opt.variable("size", "Bubble size", opt.CONTINUOUS, required=False, section="Data"),
     opt.variable("label", "Point labels", opt.ANY, required=False, section="Data"),
+    *copy.deepcopy(FACET_OPTS),
     opt.choice("xy_mode", "Replicates at the same X", [("points", "Plot every point"),
                                                        ("summary", "Plot mean/median with error bars"),
                                                        ("both", "Both")], default="points", section="Points & lines"),
@@ -525,7 +607,7 @@ _xy_options = [
 
 graph(id="xy", name="XY scatter", category="XY",
       description="Points for X–Y data, with optional lines, error bars and fitted curves.",
-      features=XY_FEATURES, prepare=_prep_xy, options=_xy_options)
+      features=XY_FEATURES, prepare=faceted(_prep_xy), options=_xy_options)
 variant(of="xy", id="xy_line", name="Line graph",
         description="Points joined by lines. Replicates at the same X are averaged with error bars.",
         defaults={"connect": "line", "xy_mode": "summary", "error": "sem"})
@@ -665,8 +747,8 @@ def _prep_density(ctx: Context) -> Prepared:
 
 graph(id="density", name="Density plot", category="Distribution",
       description="Smooth kernel density curves, overlaid or as a ridgeline plot.",
-      features=DIST_FEATURES, prepare=_prep_density,
-      options=[*opt.group_layout(min_groups=1),
+      features=DIST_FEATURES, prepare=faceted(_prep_density),
+      options=[*opt.group_layout(min_groups=1), *copy.deepcopy(FACET_OPTS),
                opt.choice("density_style", "Style", [("overlay", "Overlaid curves"), ("ridgeline", "Ridgeline (stacked rows)")],
                           default="overlay", section="Density"),
                opt.number("bw_adjust", "Smoothing", 1.0, min=0.1, max=5, step=0.1, section="Density"),
@@ -716,8 +798,8 @@ def _prep_qq(ctx: Context) -> Prepared:
 
 graph(id="qq", name="Normal QQ plot", category="Distribution",
       description="Compare the distribution of the data with a normal distribution.",
-      features=DIST_FEATURES, prepare=_prep_qq,
-      options=[*opt.group_layout(min_groups=1),
+      features=DIST_FEATURES, prepare=faceted(_prep_qq),
+      options=[*opt.group_layout(min_groups=1), *copy.deepcopy(FACET_OPTS),
                opt.number("point_size", "Point size (pt)", 5, min=0.5, max=30, step=0.5, section="Points"),
                opt.choice("point_shape", "Point shape", SHAPES, default="circle", section="Points"),
                opt.number("point_alpha", "Point opacity", 0.85, min=0.05, max=1, step=0.05, section="Points"),
@@ -752,8 +834,8 @@ def _prep_ecdf(ctx: Context) -> Prepared:
 
 graph(id="ecdf", name="Cumulative distribution", category="Distribution",
       description="Empirical cumulative frequency distribution of each group.",
-      features=DIST_FEATURES, prepare=_prep_ecdf,
-      options=[*opt.group_layout(min_groups=1),
+      features=DIST_FEATURES, prepare=faceted(_prep_ecdf),
+      options=[*opt.group_layout(min_groups=1), *copy.deepcopy(FACET_OPTS),
                opt.choice("ecdf_unit", "Y axis shows", [("fraction", "Fraction (0–1)"), ("percent", "Percent")],
                           default="percent", section="Lines"),
                opt.number("line_width", "Line thickness (pt)", 1.6, min=0.1, max=6, step=0.1, section="Lines")])

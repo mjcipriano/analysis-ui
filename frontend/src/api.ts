@@ -38,6 +38,21 @@ export const api = {
     return res.blob()
   },
 
+  renderLayout: (layout: object, signal?: AbortSignal) =>
+    post<Reply<{ svg: string }>>('/api/layouts/render', { layout }, signal),
+
+  exportLayout: async (layout: object, format: string, dpi: number): Promise<Blob> => {
+    const res = await fetch('/api/layouts/export', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layout, format, dpi }),
+    })
+    if (!res.ok) {
+      let msg = `Export failed (${res.status}).`
+      try { msg = (await res.json()).message ?? msg } catch { /* keep default */ }
+      throw new Error(msg)
+    }
+    return res.blob()
+  },
+
   importFile: async (file: File): Promise<Reply<{ sheets: WireSheet[] }>> => {
     const form = new FormData()
     form.append('file', file)

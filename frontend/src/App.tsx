@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnalysisView } from './components/AnalysisView'
 import { GraphView } from './components/GraphView'
+import { LayoutView } from './components/LayoutView'
 import { AnalysisPicker, GraphGallery } from './components/Pickers'
 import { SheetView } from './components/SheetView'
 import { Sidebar } from './components/Sidebar'
@@ -16,6 +17,7 @@ export default function App() {
   const selection = useStore((s) => s.selection)
   const sheets = useStore((s) => s.sheets)
   const items = useStore((s) => s.items)
+  const layouts = useStore((s) => s.layouts)
   const name = useStore((s) => s.name)
   const dark = useStore((s) => s.dark)
   const toasts = useStore((s) => s.toasts)
@@ -49,7 +51,8 @@ export default function App() {
 
   const sheet = selection.kind === 'sheet' ? sheets.find((s) => s.id === selection.id) : undefined
   const item = selection.kind === 'analysis' || selection.kind === 'graph' ? items.find((i) => i.id === selection.id) : undefined
-  const showWelcome = selection.kind === 'welcome' || (!sheet && !item)
+  const layout = selection.kind === 'layout' ? layouts.find((l) => l.id === selection.id) : undefined
+  const showWelcome = selection.kind === 'welcome' || (!sheet && !item && !layout)
 
   return (
     <div className={`app ${dragging ? 'dragging' : ''}`}
@@ -85,6 +88,7 @@ export default function App() {
           {!showWelcome && sheet && <SheetView key={sheet.id} sheet={sheet} onAnalyze={() => setAnalyzeFor(sheet)} onGraph={() => setGraphFor(sheet)} />}
           {!showWelcome && item?.kind === 'analysis' && <AnalysisView key={item.id} item={item} />}
           {!showWelcome && item?.kind === 'graph' && <GraphView key={item.id} item={item} />}
+          {!showWelcome && layout && <LayoutView key={layout.id} layout={layout} />}
         </main>
       </div>
       {dataMenu && <Menu at={dataMenu} onClose={() => setDataMenu(null)} items={[

@@ -537,10 +537,20 @@ def power_survival(ctx: Context) -> Results:
 
 # ================================================================ correlation
 def correlation_power(rho: float, n: float, alpha: float, two_sided: bool = True) -> float:
-    """Power of the test of r = 0 by the Fisher z approximation."""
-    z = abs(math.atanh(rho)) * math.sqrt(n - 3)
-    za = _z_alpha(alpha, two_sided)
-    return float(stats.norm.sf(za - z) + (stats.norm.cdf(-za - z) if two_sided else 0.0))
+    """Power of the t test of r = 0, by the algorithm of R's ``pwr.r.test``
+    (Cohen 1988): the critical r comes from the t distribution with n − 2 df,
+    and the sampling distribution of r is approximated on the Fisher z scale
+    with the bias correction r / (2(n − 1))."""
+    r = abs(rho)
+    tcrit = stats.t.isf(alpha / 2 if two_sided else alpha, n - 2)
+    rc = math.sqrt(tcrit ** 2 / (tcrit ** 2 + n - 2))
+    zr = math.atanh(r) + r / (2 * (n - 1))
+    zrc = math.atanh(rc)
+    root = math.sqrt(n - 3)
+    power = stats.norm.cdf((zr - zrc) * root)
+    if two_sided:
+        power += stats.norm.cdf((-zr - zrc) * root)
+    return float(power)
 
 
 @analysis(
@@ -563,16 +573,14 @@ def power_correlation(ctx: Context) -> Results:
     alpha = _prob(ctx, "alpha", "The significance level")
     two_sided = ctx.opt("tails", "two") == "two"
     rows: list[tuple[str, object, str]] = [
-        ("Test", "Pearson correlation different from zero", ""), ("Expected correlation (r)", rho, ""),
-        ("Fisher z of r", math.atanh(rho), ""),
+        ("Test", "Pearson correlation different from zero (t test)", ""), ("Expected correlation (r)", rho, ""),
         ("Significance level (α)", alpha, "two-tailed" if two_sided else "one-tailed")]
     solve = ctx.opt("solve_for", "n")
     if solve == "n":
         power = _prob(ctx, "power", "Power")
         if power <= alpha:
             raise AnalysisError("The power must be larger than the significance level.")
-        za, zb = _z_alpha(alpha, two_sided), float(stats.norm.ppf(power))
-        n = ((za + zb) / math.atanh(rho)) ** 2 + 3
+        n = _solve_n(lambda m: correlation_power(rho, m, alpha, two_sided), power, 4.0)
         nc = max(4, math.ceil(n - 1e-9))
         rows += [("Target power", power, ""), ("Required sample size", nc, f"exact solution {n:.2f}"),
                  ("Actual power", correlation_power(rho, nc, alpha, two_sided), "")]
@@ -590,8 +598,9 @@ def power_correlation(ctx: Context) -> Results:
         mark_n = n
     r = Results()
     t = _kv_table(r, "Sample size and power: correlation", rows)
-    t.note("Fisher z approximation: n = ((z₍α₎ + z₍β₎) / atanh(r))² + 3. "
-           "It gives sample sizes within about one subject of exact methods (e.g. R's pwr.r.test).")
+    t.note("Method of Cohen (1988) as implemented in R's pwr.r.test: the critical correlation is taken from the "
+           "t distribution with n − 2 df, and power from the Fisher z transformation of r with the bias "
+           "correction r / (2(n − 1)).")
     r.summary(concl)
     if ctx.opt("show_plot", True):
         ns = _n_grid(n, 4)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { isVisible, levelsOf } from '../data'
-import type { Column, OptionDef, Sheet } from '../types'
+import type { Annotation, Column, OptionDef, Sheet } from '../types'
 import { Icon, TypeGlyph } from './ui'
 
 interface Props {
@@ -131,6 +131,7 @@ function Field(p: FieldProps) {
         {def.type === 'level' && <LevelField {...p} />}
         {def.type === 'color' && <ColorField value={p.value} onChange={p.onChange} />}
         {def.type === 'group_colors' && <GroupColors {...p} />}
+        {def.type === 'annotations' && <AnnotationList value={p.value} onChange={p.onChange} />}
       </div>
       {def.help && def.type !== 'group_colors' && <div className="field-help">{def.help}</div>}
     </div>
@@ -327,6 +328,46 @@ function GroupColors({ value, groups, onChange }: FieldProps) {
         </label>
       ))}
       {hasCustom && <button className="link" onClick={() => onChange({})}>Reset all colors</button>}
+    </div>
+  )
+}
+
+function AnnotationList({ value, onChange }: { value: any; onChange: (v: Annotation[]) => void }) {
+  const items: Annotation[] = Array.isArray(value) ? value : []
+  const patch = (i: number, p: Record<string, any>) => onChange(items.map((a, j) => (j === i ? ({ ...a, ...p } as Annotation) : a)))
+  if (!items.length) return <div className="muted small">None yet.</div>
+  return (
+    <div className="anno-list">
+      {items.map((a, i) => (
+        <div key={i} className="anno-item">
+          {a.kind === 'text' ? (
+            <>
+              <input type="text" value={a.text} onChange={(e) => patch(i, { text: e.target.value })} />
+              <div className="anno-item-row">
+                <input type="number" title="Size (pt)" placeholder="size" min={4} max={72} step={0.5} value={a.size ?? ''}
+                  onChange={(e) => patch(i, { size: e.target.value === '' ? null : Number(e.target.value) })} />
+                <button className={`btn mini ${a.bold ? 'on' : ''}`} title="Bold" onClick={() => patch(i, { bold: !a.bold })}><b>B</b></button>
+                <button className={`btn mini ${a.italic ? 'on' : ''}`} title="Italic" onClick={() => patch(i, { italic: !a.italic })}><i>I</i></button>
+                <select title="Alignment" value={a.align ?? 'center'} onChange={(e) => patch(i, { align: e.target.value })}>
+                  <option value="left">Left</option><option value="center">Center</option><option value="right">Right</option>
+                </select>
+                <input type="number" title="Rotation (degrees)" placeholder="0°" step={15} value={a.angle || ''} onChange={(e) => patch(i, { angle: Number(e.target.value) || 0 })} />
+              </div>
+            </>
+          ) : (
+            <div className="anno-item-row">
+              <select value={a.kind} onChange={(e) => patch(i, { kind: e.target.value })}><option value="arrow">Arrow</option><option value="line">Line</option></select>
+              <input type="number" title="Thickness (pt)" min={0.25} max={12} step={0.25} value={a.width ?? 1.2} onChange={(e) => patch(i, { width: Number(e.target.value) || 1.2 })} />
+            </div>
+          )}
+          <div className="anno-item-row">
+            <input type="color" value={/^#[0-9a-f]{6}$/i.test(a.color ?? '') ? a.color : '#111111'} onChange={(e) => patch(i, { color: e.target.value })} />
+            <span className="muted small">{a.color || 'theme color'}</span>
+            <span style={{ flex: 1 }} />
+            <button className="link" onClick={() => onChange(items.filter((_, j) => j !== i))}>Remove</button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
