@@ -14,6 +14,7 @@ Conventions for all payloads
 """
 from __future__ import annotations
 
+import copy
 import math
 
 import numpy as np
@@ -25,6 +26,15 @@ from ..core.errors import AnalysisError
 from ..core.results import stars
 from . import compute
 from .registry import Prepared, graph, variant
+
+def _label_text(v):
+    """Cell value -> label string (numbers without a trailing .0)."""
+    if v is None or (isinstance(v, float) and math.isnan(v)) or v is pd.NA:
+        return None
+    if isinstance(v, (int, float, np.integer, np.floating)):
+        return f"{float(v):g}"
+    return str(v)
+
 
 # ---------------------------------------------------------------- option kits
 CENTER = [("mean", "Mean"), ("median", "Median"), ("geomean", "Geometric mean")]
@@ -413,7 +423,7 @@ def _prep_xy(ctx: Context) -> Prepared:
         if sv:
             part["size"] = ctx.numeric(sv).to_numpy()
         if lv:
-            part["label"] = ctx.column(lv).astype(object).map(lambda v: None if pd.isna(v) else str(v)).to_numpy()
+            part["label"] = ctx.column(lv).astype(object).map(_label_text).to_numpy()
         parts.append(part)
     df = pd.concat(parts, ignore_index=True)
     df = df[df["x"].notna() & df["y"].notna() & df["group"].notna()].reset_index(drop=True)
@@ -470,7 +480,7 @@ def _prep_xy(ctx: Context) -> Prepared:
         frames["fit"] = ft.reset_index(drop=True)
     return Prepared(frames=frames,
                     computed={"series": series, "mode": mode, "fits": fits,
-                              "has_size": bool(sv), "has_label": bool(lv),
+                              "has_size": bool(sv), "has_label": bool(lv), "size_label": sv or "",
                               "center": ctx.opt("center", "mean"), "error": ctx.opt("error", "sd")},
                     color_keys=series, x_label=xv, y_label=ys[0] if len(ys) == 1 else "",
                     legend_title=gv or "", warnings=warnings)
@@ -1129,7 +1139,7 @@ _corr = graph(id="corr_matrix", name="Correlation matrix", category="Matrix",
                                                     ("upper", "Upper triangle")], default="full", section="Data"),
                        opt.boolean("cluster", "Order variables by clustering", False, section="Data"),
                        opt.boolean("mark_sig", "Mark significant correlations with stars", False, section="Cells"),
-                       *_matrix_cell_opts])
+                       *copy.deepcopy(_matrix_cell_opts)])
 _corr.render_type = "heatmap"
 for _o in _corr.options:
     if _o["name"] == "colormap":
@@ -1319,7 +1329,7 @@ def _prep_forest(ctx: Context) -> Prepared:
     """
     lv, ev = ctx.var("label"), ctx.var("estimate")
     lo, hi = ctx.var("lower"), ctx.var("upper")
-    df = pd.DataFrame({"label": ctx.column(lv).astype(object).map(lambda v: None if pd.isna(v) else str(v)),
+    df = pd.DataFrame({"label": ctx.column(lv).astype(object).map(_label_text),
                        "est": ctx.numeric(ev), "lo": ctx.numeric(lo), "hi": ctx.numeric(hi)})
     df = df[df["label"].notna() & df["est"].notna()].reset_index(drop=True)
     if df.empty:
@@ -1367,7 +1377,7 @@ def _prep_waterfall(ctx: Context) -> Prepared:
     vv = ctx.var("value")
     lv, gv = ctx.var("label", required=False), ctx.var("group", required=False)
     df = pd.DataFrame({"value": ctx.numeric(vv).to_numpy()})
-    df["label"] = (ctx.column(lv).astype(object).map(lambda v: None if pd.isna(v) else str(v)).to_numpy()
+    df["label"] = (ctx.column(lv).astype(object).map(_label_text).to_numpy()
                    if lv else [str(i + 1) for i in range(len(df))])
     df["group"] = ctx.factor(gv).astype(object).to_numpy() if gv else "All"
     df = df.dropna().reset_index(drop=True)

@@ -87,8 +87,8 @@ m = 1500
 fc = rng.normal(0, 0.9, m)
 hits = rng.choice(m, 90, replace=False)
 fc[hits] += rng.choice([-1, 1], 90) * rng.uniform(1.2, 3.5, 90)
-z = np.abs(fc) * rng.uniform(1.2, 3.2, m) + rng.exponential(0.4, m)
-p = np.clip(2 * (1 - __import__("scipy.stats").stats.norm.cdf(z)), 1e-18, 1)
+z = np.abs(fc) * rng.uniform(0.7, 2.1, m) + rng.exponential(0.4, m)
+p = np.clip(2 * (1 - __import__("scipy.stats").stats.norm.cdf(z)), 1e-40, 1)
 save("volcano", "Differential expression (volcano)", "log2 fold change and P value for 1,500 genes.",
      pd.DataFrame({"Gene": [f"GENE{i+1}" for i in range(m)], "log2FC": fc.round(3), "P value": p}), "volcano")
 # 11 repeated measures
