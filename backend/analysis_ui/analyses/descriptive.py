@@ -849,8 +849,8 @@ def frequency(ctx: Context) -> Results:
                        color=COLORS[i % len(COLORS)], alpha=0.85 if g > 1 else 0.8,
                        edgecolor="white", linewidth=0.5, label=name)
         ax.set_xlabel(value_label(ctx))
-        ax.set_ylabel(("Cumulative " if cumulative else "") + {"count": "number of values", "percent": "% of values",
-                                                              "fraction": "fraction of values"}[mode])
+        ylab = {"count": "Number of values", "percent": "% of values", "fraction": "Fraction of values"}[mode]
+        ax.set_ylabel("Cumulative " + ylab.lower() if cumulative else ylab)
         if g > 1:
             ax.legend()
         r.plot("Cumulative distribution" if cumulative else "Histogram", fig)
@@ -972,9 +972,8 @@ def one_sample(ctx: Context) -> Results:
             if d["n"] > 1:
                 ax.errorbar(i + 0.3, d["mean"], yerr=[[d["mean"] - d["ci_lo"]], [d["ci_hi"] - d["mean"]]],
                             fmt="o", color="#222222", ms=4, capsize=3, lw=1.2, zorder=5)
-        ax.axhline(mu, color=COLORS[1], ls="--", lw=1.1)
-        ax.annotate(f"hypothetical = {mu:g}", (1, mu), xycoords=("axes fraction", "data"),
-                    xytext=(-2, 3), textcoords="offset points", ha="right", fontsize=8, color=COLORS[1])
+        ax.axhline(mu, color=COLORS[1], ls="--", lw=1.1, label=f"Hypothetical value ({mu:g})")
+        ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1))
         ax.set_ylabel(value_label(ctx))
         r.plot(f"Values with mean and {cl} CI", fig)
     return r

@@ -38,7 +38,7 @@ def parse_numbers(text: str, what: str = "values") -> list[float]:
 def p_phrase(p: float) -> str:
     """``P = 0.0123`` / ``P < 0.0001`` for sentences."""
     txt = fmt_p(p)
-    return f"P {txt}" if txt.startswith("<") else f"P = {txt}"
+    return f"P < {txt[1:]}" if txt.startswith("<") else f"P = {txt}"
 
 
 def _xy_datasets(ctx: Context) -> tuple[str, dict[str, tuple[np.ndarray, np.ndarray]], int]:
@@ -215,11 +215,40 @@ def derived_values(fit: Fit) -> list[dict]:
     return out
 
 
+_SCALE_PARAMS = ("EC50", "Km", "Kd", "K", "KFast", "KSlow", "k", "Vmax", "Bmax")
+
+
+def dependencies(fit: Fit) -> np.ndarray:
+    """Dependency of each parameter (0–1), as reported by Prism: how much of
+    its uncertainty is due to intertwining with the other parameters."""
+    cov = fit.pcov
+    sd = np.sqrt(np.diag(cov))
+    if not np.all(np.isfinite(cov)) or np.any(sd <= 0) or len(sd) < 2:
+        return np.full(len(sd), np.nan)
+    corr = cov / np.outer(sd, sd)
+    try:
+        inv = np.linalg.inv(corr)
+    except np.linalg.LinAlgError:
+        return np.ones(len(sd))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return 1 - 1 / np.diag(inv)
+
+
 def _fit_problem(fit: Fit) -> str | None:
+    """A plain-language description of an untrustworthy fit, or None."""
     se = np.array(list(fit.se.values()), dtype=float)
     if not np.all(np.isfinite(se)):
         return ("the fit is ambiguous: at least one parameter could not be determined from these "
                 "data (its standard error is infinite)")
+    dep = dependencies(fit)
+    if np.any(dep > 0.9999):
+        worst = fit.model.params[int(np.nanargmax(dep))]
+        return (f"the fit is ambiguous: {worst} is almost completely intertwined with the other parameters "
+                "(dependency > 0.9999), so the data do not define it")
+    vague = [p for p in fit.model.params if p in _SCALE_PARAMS and fit.se[p] > abs(fit.params[p])]
+    if vague:
+        return (f"{', '.join(vague)} is very uncertain (its standard error is larger than the estimate); "
+                "the data probably do not cover enough of the curve to define it")
     return None
 
 
@@ -294,7 +323,10 @@ def nonlinear_regression(ctx: Context) -> Results:
         if use_means:
             x, y = _means_at_x(x, y)
         data_used[name] = (x, y)
-        fit, err = _try_fit(model, x, y, weighting, fixed)
+        if len(y) > 1 and np.ptp(y) == 0:
+            fit, err = None, "all Y values are identical, so there is no curve to fit."
+        else:
+            fit, err = _try_fit(model, x, y, weighting, fixed)
         if fit is None:
             failed[name] = err or "unknown problem"
         else:
@@ -678,7 +710,7 @@ def interpolate_standard_curve(ctx: Context) -> Results:
         xv = fit.solve_x(yv)
         lo = hi = float("nan")
         if xv != xv:
-            note = "Out of range: the standard curve does not reach this signal"
+            note = "Out of range: the curve does not reach this signal near the range of the standards"
         else:
             if want_ci:
                 lo, hi = _band_crossings(fit, yv, xv)

@@ -487,10 +487,10 @@ def icc_agreement(ctx: Context) -> Results:
     if np.ptp(data) == 0:
         raise AnalysisError("All values are identical, so reliability cannot be estimated.")
     alpha = float(ctx.opt("alpha", 0.05))
-    rows, anova = icc_all(data, alpha)
-    if anova["MSB"] == 0:
+    if np.ptp(data.mean(axis=1)) == 0:
         raise AnalysisError("The subjects do not differ from each other (every row has the same mean), "
                             "so an intraclass correlation cannot be estimated.")
+    rows, anova = icc_all(data, alpha)
     r = Results()
     if full > n:
         r.warn(f"{full - n} row(s) with a missing value were excluded (complete rows only).")

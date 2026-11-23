@@ -201,7 +201,11 @@ axis_spec <- function(ctx, which, rng, zero = FALSE, flush = FALSE, mult = c(0.0
     if (rng[2] == 0) hi <- tf$tr(0)
   }
   if (scale == "sqrt") lo <- max(lo, 0)
-  if (!is.null(fixed)) { lo <- tf$tr(fixed[1]); hi <- tf$tr(fixed[2]) }
+  if (!is.null(fixed)) {
+    tl <- suppressWarnings(tf$tr(fixed))
+    if (is.finite(tl[1])) lo <- tl[1]
+    if (is.finite(tl[2])) hi <- tl[2]
+  }
   umin <- opt_num(o, paste0(which, "_min")); umax <- opt_num(o, paste0(which, "_max"))
   if (is_log) { if (!is.na(umin) && umin <= 0) umin <- NA; if (!is.na(umax) && umax <= 0) umax <- NA }
   if (scale == "sqrt") { if (!is.na(umin) && umin < 0) umin <- 0; if (!is.na(umax) && umax <= 0) umax <- NA }
@@ -394,7 +398,9 @@ gg_theme <- function(ctx, legend = "none", x_angle = NULL, key_w = 1, void = FAL
   }
   if (void) {
     t <- t + theme(axis.line = element_blank(), axis.ticks = element_blank(), axis.text = element_blank(),
-                   axis.title = element_blank(), panel.grid.major.x = element_blank(),
+                   axis.text.x = element_blank(), axis.text.y = element_blank(),
+                   axis.title = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(),
+                   panel.grid.major.x = element_blank(),
                    panel.grid.major.y = element_blank(), panel.border = element_blank(),
                    panel.background = element_blank(), axis.ticks.length = grid::unit(0, "pt"))
   }
@@ -474,7 +480,7 @@ panel_size <- function(ctx, left_w = NULL, bottom_h = NULL, right = 0, top = 0, 
       if (legend == "top") topm <- topm + h else bottom <- bottom + h
     }
   }
-  list(w = max(ctx$W * 72 - left - rightm, 20), h = max(ctx$H * 72 - topm - bottom, 20))
+  list(w = max(ctx$W * 72 - left - rightm, 20), h = max(ctx$H * 72 - topm - bottom, 20), left = left, right = rightm)
 }
 
 # ---- markers -----------------------------------------------------------------

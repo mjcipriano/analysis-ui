@@ -29,7 +29,9 @@ render_heatmap <- function(ctx) {
                                                                    max_text_w(ctx, bar_title, f$legend, TRUE) - f$legend * 1.1) + f$legend * 2 else 0
   bar_h <- if (legend %in% c("top", "bottom")) f$legend * 4.2 else 0
   P0 <- panel_size(ctx, left_w = row_w, bottom_h = f$tick * 1.1, right = bar_w, top = if (legend == "top") bar_h else 0)
+  square <- opt_flag(o, "square")
   cw <- P0$w / nc
+  if (square) cw <- min(cw, P0$h / nr)
   choice <- opt_chr(o, "x_tick_angle", "auto")
   angle <- if (choice == "auto") {
     if (col_w <= cw * 0.92) NULL else if (f$tick * 1.5 > cw) tick_angle(90) else tick_angle(45)
@@ -38,7 +40,6 @@ render_heatmap <- function(ctx) {
   bottom_h <- if (a == 0) f$tick * 1.15 else col_w * sin(a * pi / 180) + f$tick * cos(a * pi / 180)
   P <- panel_size(ctx, left_w = row_w, bottom_h = bottom_h + (if (legend == "bottom") bar_h else 0), right = bar_w,
                   top = if (legend == "top") bar_h else 0)
-  square <- opt_flag(o, "square")
   cw <- P$w / nc; ch <- P$h / nr
   if (square) cw <- ch <- min(cw, ch)
 
@@ -95,14 +96,15 @@ render_heatmap <- function(ctx) {
   p <- ggplot() + layers +
     do.call(scale_fill_gradientn, c(fill_args, list(guide = guide))) +
     do.call(scale_colour_gradientn, c(fill_args, list(guide = "none"))) +
-    scale_x_continuous(breaks = seq_len(nc), labels = thin(cols, if (a == 0) cw * 0 + col_w * 0 + cw else cw), expand = c(0, 0)) +
+    scale_x_continuous(breaks = seq_len(nc), labels = thin(cols, cw), expand = c(0, 0)) +
     scale_y_continuous(breaks = seq_len(nr), labels = rev(thin(rows, ch)), expand = c(0, 0)) +
     (if (square) coord_fixed(xlim = xlim, ylim = ylim, expand = FALSE) else coord_cartesian(xlim = xlim, ylim = ylim, expand = FALSE)) +
     gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = angle) +
     theme(axis.line = element_blank(), axis.ticks = element_blank(), panel.border = element_blank(),
           panel.grid.major.x = element_blank(), panel.grid.major.y = element_blank(),
           axis.ticks.length = grid::unit(1.5, "pt"),
-          legend.title = element_text(colour = ctx$th$text, size = f$legend, face = "bold"))
+          legend.title = element_text(colour = ctx$th$text, size = f$legend, face = "bold",
+                                      margin = margin(b = f$legend * 0.5)))
   p
 }
 register("heatmap", render_heatmap)

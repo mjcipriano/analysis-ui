@@ -274,14 +274,14 @@ def draw_boxes(p: Plot, cells: list[Cell], *, whiskers: str = "tukey", outliers:
 
 def draw_violins(p: Plot, cells: list[Cell], *, inner: str = "box", scale: str = "width", trim: bool = True,
                  bw_adjust: float = 1.0, width_frac: float = 0.8, alpha: float = 0.6, outline: str = "match",
-                 outline_width: float = 1.0, side: int = 0, offset: float = 0.0):
+                 outline_width: float = 1.0, side: int = 0, offset: float = 0.0, cut: float = 2.0):
     """Violins (``side`` 0) or half violins (``side`` ±1, growing towards that
     side of ``pos + offset``)."""
     cells = [c for c in cells if len(c.values)]
     if not cells:
         return
     lw = max(outline_width, 0.0) if outline != "none" else 0.0
-    curves = {c.index: kde_curve(c.values, bw_adjust, trim) for c in cells}
+    curves = {c.index: kde_curve(c.values, bw_adjust, trim, cut) for c in cells}
     peak = max((k[1].max() for k in curves.values() if k is not None), default=1.0) or 1.0
     nmax = max(len(c.values) for c in cells)
     shapes, faces, edges = [], [], []
@@ -459,7 +459,7 @@ def raincloud(p: Plot):
     alpha = p.num("fill_alpha", 0.6)
     s = -1 if p.flip else 1                          # the cloud points up on horizontal graphs
     draw_violins(p, cells, inner="none", scale="width", trim=False, bw_adjust=p.num("bw_adjust", 1.0),
-                 width_frac=0.42, alpha=alpha, outline="match", outline_width=1.0, side=s, offset=0.07 * s)
+                 width_frac=0.42, alpha=alpha, outline="match", outline_width=1.0, side=s, offset=0.07 * s, cut=1.0)
     if p.opt("show_box", True):
         draw_boxes(p, cells, whiskers="tukey", outliers=False, width_frac=0.09, alpha=min(alpha + 0.2, 1.0),
                    outline="match", outline_width=1.0, caps=False, zorder=Z_LINE)

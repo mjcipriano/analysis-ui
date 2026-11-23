@@ -186,7 +186,7 @@ def beeswarm(v_px: np.ndarray, d_px: float, max_half_px: float) -> np.ndarray:
     return out
 
 
-def kde_curve(vals: np.ndarray, adjust: float = 1.0, trim: bool = True, cut: float = 2.0, n: int = 96):
+def kde_curve(vals: np.ndarray, adjust: float = 1.0, trim: bool = True, cut: float = 2.0, n: int = 128):
     """Gaussian KDE (Scott bandwidth × ``adjust``) on a grid: ``(grid, density)``,
     or ``None`` when the values have no spread."""
     v = np.asarray(vals, dtype=float)
@@ -226,6 +226,7 @@ def build_rc(fonts: dict, theme: dict, editable: bool) -> dict:
         "font.family": [family, "DejaVu Sans"], "font.size": fonts["base"],
         "mathtext.fontset": "custom", "mathtext.rm": family, "mathtext.it": f"{family}:italic",
         "mathtext.bf": f"{family}:bold", "mathtext.default": "regular",
+        "mathtext.cal": family, "mathtext.sf": family, "mathtext.tt": family,
         "axes.unicode_minus": True, "axes.formatter.use_mathtext": True,
         "svg.fonttype": "none" if editable else "path", "pdf.fonttype": 42 if editable else 3,
         "svg.hashsalt": "analysis-ui",
@@ -447,8 +448,14 @@ class Plot:
         widest = max(self.text_size(t.get_text(), fs)[0] for t in sample)
         if widest + 0.6 * fs * self.px <= slot:
             return
-        line_h = fs * self.px * 1.25
+        line_h = fs * self.px * 1.2
         self.rotate_xticks(ax, 45 if line_h * 1.3 <= slot else 90)
+        if line_h > slot:                            # even vertical labels collide: shrink, then thin out
+            new = max(slot / self.px / 1.2, 4.5)
+            keep = max(int(math.ceil(new * self.px * 1.2 / slot)), 1)
+            for i, t in enumerate(ax.get_xticklabels()):
+                t.set_fontsize(new)
+                t.set_visible(i % keep == 0)
 
     def num_axis(self, which: str, prefix: str | None = None, *, zero: bool = False, pad: float = 0.05,
                  lo: float | None = None, hi: float | None = None, pad_lo: float | None = None,
@@ -948,42 +955,40 @@ class Plot:
         obstacles = obstacles[np.isfinite(obstacles).all(axis=1)]
         box = ax.bbox
         placed = np.empty((0, 4))
-        r0 = (radius_pt + 2.0) * px
-        dirs = [(1, 1), (-1, 1), (1, -1), (-1, -1), (0, 1), (0, -1), (1, 0), (-1, 0)]
-        rings = [r0, r0 + 9 * px, r0 + 20 * px, r0 + 34 * px]
+        r0 = (radius_pt + 1.5) * px
+        angles = [45, 135, 315, 225, 90, 270, 0, 180, 20, 160, 340, 200, 70, 110, 290, 250]
+        dirs = [(math.cos(math.radians(a)), math.sin(math.radians(a))) for a in angles]
+        rings = [r0, r0 + 8 * px, r0 + 18 * px, r0 + 30 * px, r0 + 46 * px]
         color = color or self.ink
+        m = 1.5 * px                                 # breathing space around every label
         for i in keep:
             w, h = self.text_size(texts[i], size)
-            h *= 0.85
             best = None
             for ring_i, rr in enumerate(rings):
-                for dx, dy in dirs:
-                    norm = math.hypot(dx, dy)
-                    ox, oy = dx / norm * rr, dy / norm * rr
-                    x0 = pts[i, 0] + ox - (w if dx < 0 else w / 2 if dx == 0 else 0)
-                    y0 = pts[i, 1] + oy - (h if dy < 0 else h / 2 if dy == 0 else 0)
+                for ux, uy in dirs:
+                    sx = 0 if abs(ux) < 0.3 else (1 if ux > 0 else -1)
+                    sy = 0 if abs(uy) < 0.3 else (1 if uy > 0 else -1)
+                    ox, oy = ux * rr, uy * rr
+                    x0 = pts[i, 0] + ox - (w if sx < 0 else w / 2 if sx == 0 else 0)
+                    y0 = pts[i, 1] + oy - (h if sy < 0 else h / 2 if sy == 0 else 0)
                     x1, y1 = x0 + w, y0 + h
-                    cost = 0.0
+                    cost = ring_i * 0.8
                     if x0 < box.x0 or x1 > box.x1 or y0 < box.y0 or y1 > box.y1:
-                        cost += 50
+                        cost += 60
                     if len(placed):
-                        hit = (x0 < placed[:, 2]) & (x1 > placed[:, 0]) & (y0 < placed[:, 3]) & (y1 > placed[:, 1])
-                        cost += 100 * hit.sum()
-                    m = 1.5 * px
+                        cost += 100 * ((x0 - m < placed[:, 2]) & (x1 + m > placed[:, 0])
+                                       & (y0 - m < placed[:, 3]) & (y1 + m > placed[:, 1])).sum()
                     cost += ((obstacles[:, 0] > x0 - m) & (obstacles[:, 0] < x1 + m)
                              & (obstacles[:, 1] > y0 - m) & (obstacles[:, 1] < y1 + m)).sum()
-                    cost += ring_i * 0.6
                     if best is None or cost < best[0]:
-                        best = (cost, ox, oy, dx, dy, (x0, y0, x1, y1), ring_i)
-                    if cost == 0:
-                        break
-                if best[0] < 0.7 * (ring_i + 1):
+                        best = (cost, ox, oy, sx, sy, (x0, y0, x1, y1), ring_i)
+                if best[0] < 0.8 * (ring_i + 1):     # a free spot in this ring: stop searching
                     break
-            _, ox, oy, dx, dy, rect, ring_i = best
+            _, ox, oy, sx, sy, rect, ring_i = best
             placed = np.vstack([placed, rect])
             ax.annotate(texts[i], (x[i], y[i]), xytext=(ox / px, oy / px), textcoords="offset points",
-                        ha="right" if dx < 0 else "center" if dx == 0 else "left",
-                        va="top" if dy < 0 else "center" if dy == 0 else "bottom",
+                        ha="right" if sx < 0 else "center" if sx == 0 else "left",
+                        va="top" if sy < 0 else "center" if sy == 0 else "bottom",
                         fontsize=size, color=color, zorder=Z_TEXT,
                         arrowprops=(dict(arrowstyle="-", linewidth=0.5, color=mix(color, self.panel, 0.4),
                                          shrinkA=0.5, shrinkB=radius_pt) if ring_i > 0 else None))
@@ -1012,6 +1017,14 @@ class Plot:
         buf = io.BytesIO()
         self.fig.savefig(buf, **kw)
         return buf.getvalue()
+
+
+def tidy_labels(labels) -> list[str]:
+    """Row labels as text; whole numbers that arrive as floats ("14.0") lose the ".0"."""
+    out = [str(l) for l in labels]
+    if out and all(s.endswith(".0") and s[:-2].lstrip("-").isdigit() for s in out):
+        out = [s[:-2] for s in out]
+    return out
 
 
 def require(frame, name: str = "data"):

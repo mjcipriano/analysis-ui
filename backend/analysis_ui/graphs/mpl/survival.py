@@ -81,6 +81,8 @@ def _risk_table(p: Plot, risk, groups: list[str]):
                 tab.text(t, i, f"{int(k)}", ha="center", va="center", fontsize=fs, color=cols[i], clip_on=False)
     tab.text(0.0, 1.0, "Number at risk", transform=tab.transAxes, ha="left", va="bottom", fontsize=fs,
              fontweight="bold", color=p.ink)
+    widest = max((p.text_size(f"{int(k)}", fs)[0] for k in risk["n"] if np.isfinite(k)), default=0.0)
+    tab.tick_params(axis="y", pad=widest / 2 / p.px + 5)        # keep group names clear of the first column
     row_h = fs * p.px * 1.45
     title_h = fs * p.px * 1.7
 

@@ -42,6 +42,13 @@ def fmt_p(p: float | None) -> str:
     return f"{p:.4f}"
 
 
+def p_text(p: float | None) -> str:
+    """For sentences: ``"P = 0.0123"`` or ``"P < 0.0001"``."""
+    if p is None or p != p:
+        return "P not available"
+    return "P < 0.0001" if p < 0.0001 else f"P = {p:.4f}"
+
+
 class Table:
     def __init__(self, title: str, columns: Sequence[tuple | dict]):
         self.title = title

@@ -5,10 +5,12 @@ SHAPE_CYCLE <- c(16, 15, 17, 18, 1, 0, 2, 5)
 
 # shared tail of every graph with two numeric axes
 xy_assemble <- function(ctx, ax_x, ax_y, layers, legend, keys, key_labels = NULL, key_w = 1, extra_cols = NULL,
-                        scales = list(), coord = NULL, theme_extra = NULL, dark = TRUE) {
+                        scales = list(), coord = NULL, theme_extra = NULL, dark = TRUE,
+                        x_breaks = NULL, y_breaks = NULL) {
   angle <- tick_angle(opt_chr(ctx$o, "x_tick_angle", "auto"))
   ggplot() + ref_lines(ctx, ax_x, ax_y) + layers +
-    axis_scale(ctx, ax_x) + axis_scale(ctx, ax_y) +
+    axis_scale(ctx, ax_x, breaks = x_breaks, labels = if (!is.null(x_breaks)) fmt_num(x_breaks)) +
+    axis_scale(ctx, ax_y, breaks = y_breaks, labels = if (!is.null(y_breaks)) fmt_num(y_breaks)) +
     colour_scales(ctx, keys, labels = key_labels, extra = c(if (dark) dark_extra(ctx, keys), extra_cols)) + scales +
     (coord %||% coord_cartesian(xlim = ax_x$lim, ylim = ax_y$lim, expand = FALSE)) +
     gg_labs(ctx) + gg_theme(ctx, legend = legend, x_angle = angle, key_w = key_w) + theme_extra
@@ -186,9 +188,10 @@ render_xy <- function(ctx) {
                    key_w = key_w, scales = scales)
   if (bubbles) p <- p + theme(legend.title = element_text(colour = ctx$th$text, size = ctx$f$legend, face = "bold"))
   if (legend == "bottom" && !is.null(fit_labels)) {
-    p <- p + guides(colour = guide_legend(ncol = 1), fill = guide_legend(ncol = 1),
-                    linetype = if (lt_map) guide_legend(ncol = 1) else "none",
-                    shape = if (shape_opt == "auto" && !bubbles) guide_legend(ncol = 1) else "none")
+    g <- guide_legend(ncol = 1, byrow = TRUE)
+    p <- p + guides(colour = g, fill = g, linetype = if (lt_map) g else "none",
+                    shape = if (shape_opt == "auto" && !bubbles) g else "none") +
+      theme(legend.spacing.y = grid::unit(ctx$f$legend * 0.45, "pt"))
   }
   p
 }

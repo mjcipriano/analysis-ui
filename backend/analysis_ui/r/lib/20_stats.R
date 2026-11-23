@@ -667,7 +667,7 @@ st_empty_cells <- function(data, factors, names) {
   apply(empty, 1, function(r) paste(paste0(vapply(factors, function(f) st_name(names, f), ""), " = ", r), collapse = ", "))
 }
 
-st_fmt <- function(x, digits = 4) formatC(x, digits = digits, format = "g")
+st_fmt <- function(x, digits = 4) trimws(formatC(as.numeric(x), digits = digits, format = "g"))
 
 # "F(2, 27) = 4.56"
 st_fmt_f <- function(f, df1, df2) {

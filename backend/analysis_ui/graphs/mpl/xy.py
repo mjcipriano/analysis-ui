@@ -159,8 +159,10 @@ def xy(p: Plot):
                 p.lg_line(wrap_fit_label(fit_labels[s]), col, lw, ls)
                 extra = True
     if has_size and smax and show_points and raw:
-        vals = [v for v in mticker.MaxNLocator(nbins=3, steps=[1, 2, 2.5, 5, 10]).tick_values(0, smax)
-                if 0 < v <= smax * 1.001][-3:]
+        smin = float(np.nanmin(np.where(S > 0, S, np.nan)))
+        vals = [v for v in mticker.MaxNLocator(nbins=4, steps=[1, 2, 2.5, 5, 10]).tick_values(smin, smax)
+                if smin * 0.999 <= v <= smax * 1.001 and v > 0]
+        vals = [vals[0], vals[len(vals) // 2], vals[-1]] if len(vals) > 3 else (vals or [smax])
         if vals:
             if len(series) == 1:
                 p.legend_items = []

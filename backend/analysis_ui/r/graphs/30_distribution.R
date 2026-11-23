@@ -44,7 +44,7 @@ render_histogram <- function(ctx) {
   line_pt <- if (!is.finite(bin_pt) || bin_pt >= 5) 0.75 else if (bin_pt >= 2.5) 0.4 else 0
   m <- aes(xmin = .data$xmin, xmax = .data$xmax, ymin = .data$ymin, ymax = .data$ymax, fill = .data$key)
   args <- list(data = bins, alpha = opt_num(o, "fill_alpha", 0.6), linewidth = lw(max(line_pt, 0.01)),
-               linejoin = "mitre", show.legend = TRUE)
+               linejoin = "mitre", show.legend = c(fill = TRUE, colour = FALSE, linetype = FALSE))
   if (line_pt == 0) outline <- "none"
   if (outline == "match") m$colour <- quote(.data$key)
   else args$colour <- switch(outline, white = ctx$th$panel_bg, black = ctx$ink, NA)

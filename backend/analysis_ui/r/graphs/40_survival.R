@@ -23,8 +23,8 @@ render_survival <- function(ctx) {
   risk <- ctx$frames$risk
   show_risk <- opt_flag(o, "risk_table") && has_rows(risk)
   risk_times <- num_vec(comp$risk_times)
-  ax_x <- axis_spec(ctx, "x", finite_range(0, curve$time, if (show_risk) risk_times), zero = TRUE, flush = TRUE,
-                    mult = c(0, 0.04))
+  ax_x <- axis_spec(ctx, "x", finite_range(0, curve$time, if (show_risk) risk_times), zero = TRUE,
+                    mult = c(0.04, 0.04))
   ax_y <- axis_spec(ctx, "y", c(0, top), fixed = c(0, top * 1.04))
   legend <- legend_position(ctx, if (k > 1) "right" else "none")
   P <- xy_panel(ctx, ax_y, legend, keys, key_w = 2)
@@ -92,12 +92,14 @@ render_survival <- function(ctx) {
     axis.line = element_blank(), axis.ticks = element_blank(), panel.border = element_blank(),
     panel.grid.major.x = element_blank(), panel.grid.major.y = element_blank(),
     panel.background = element_blank(), axis.text.x = element_blank(), axis.title = element_blank(),
+    axis.title.x = element_blank(), axis.title.y = element_blank(),
     axis.ticks.length = grid::unit(0, "pt"),
     plot.title = element_text(size = f$tick, face = "bold", hjust = 0, colour = ctx$th$text, margin = margin(b = 2)),
     plot.title.position = "panel",
     plot.margin = margin(2, max(5, f$base * 0.55) + 3, max(5, f$base * 0.55), max(5, f$base * 0.55)))
   table_theme <- table_theme + suppressWarnings(theme(
-    axis.text.y = element_text(colour = rev(unname(cols)), size = f$tick, face = "bold", hjust = 1)))
+    axis.text.y = element_text(colour = rev(unname(cols)), size = f$tick, face = "bold", hjust = 1,
+                               margin = margin(r = f$tick * 0.8))))
   tab <- ggplot(risk) +
     geom_text(aes(x = .data$time, y = .data$row, label = .data$n), size = ts(f$tick), colour = ctx$th$text,
               family = f$family) +
@@ -108,6 +110,9 @@ render_survival <- function(ctx) {
     table_theme
   p <- p + labs(caption = NULL) + theme(plot.margin = margin(max(5, f$base * 0.55), max(5, f$base * 0.55) + 3, 2,
                                                               max(5, f$base * 0.55)))
-  patchwork::wrap_plots(p, tab, ncol = 1, heights = grid::unit(c(1, k * row_pt), c("null", "pt")))
+  patchwork::wrap_plots(p, tab, ncol = 1, heights = grid::unit(c(1, k * row_pt), c("null", "pt"))) +
+    patchwork::plot_annotation(theme = theme(
+      plot.background = element_rect(fill = if (ctx$th$transparent) NA else ctx$th$bg, colour = NA),
+      plot.margin = margin(0, 0, 0, 0)))
 }
 register("survival", render_survival)

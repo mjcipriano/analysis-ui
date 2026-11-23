@@ -39,7 +39,8 @@ def ci_wilson(k: float, n: float, conf: float = 0.95) -> tuple[float, float]:
     p = k / n
     centre = (p + z * z / (2 * n)) / (1 + z * z / n)
     h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
-    return max(0.0, centre - h), min(1.0, centre + h)
+    # exact end points when the proportion is 0 or 1 (avoids rounding noise)
+    return (0.0 if k == 0 else max(0.0, centre - h)), (1.0 if k == n else min(1.0, centre + h))
 
 
 def ci_clopper_pearson(k: float, n: float, conf: float = 0.95) -> tuple[float, float]:

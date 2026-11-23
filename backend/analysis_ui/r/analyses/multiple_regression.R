@@ -84,7 +84,7 @@ run <- function(data, options) {
   if (aui_flag(options, "vif", TRUE) && intercept && ncol(mm) > 2) {
     tab$vif <- st_vif(mm)
     notes <- c(notes, "VIF (variance inflation factor) above about 5–10 signals strong collinearity among predictors. Interaction and polynomial terms inflate VIFs by construction.")
-    if (any(tab$vif > 10, na.rm = TRUE)) aui_warn("Some predictors are strongly collinear (VIF > 10): their coefficients are estimated imprecisely and can change a lot when other predictors are added or removed.")
+    if (any(tab$vif > 10, na.rm = TRUE) && identical(aui_opt(options, "interactions", "none"), "none")) aui_warn("Some predictors are strongly collinear (VIF > 10): their coefficients are estimated imprecisely and can change a lot when other predictors are added or removed.")
   }
   aui_table("Coefficients", tab, formats = c(p = "p"),
             labels = c(est = "Estimate (B)", se = "SE", p = "P value", lower = paste(st_pct(alpha), "CI lower"),
