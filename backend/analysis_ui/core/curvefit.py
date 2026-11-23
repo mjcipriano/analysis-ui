@@ -33,6 +33,12 @@ class Model:
     lower: Sequence[float] | None = None
     upper: Sequence[float] | None = None
     description: str = ""
+    fixed: dict = field(default_factory=dict)   # parameters held constant (see constrain_model)
+
+    @property
+    def log_dose(self) -> bool:
+        """A dose-response model whose X is a concentration (best shown on a log axis)."""
+        return self.group == "Dose–response" and self.positive_x
 
 
 def _span(y):
@@ -204,6 +210,72 @@ def model_choices() -> list[tuple[str, str]]:
     return [(m.id, m.name) for m in MODELS.values()]
 
 
+def parse_constraints(text: str, model: Model) -> dict[str, float]:
+    """Parse ``"Bottom=0, Top=100"`` into ``{"Bottom": 0.0, "Top": 100.0}``.
+
+    Names are matched case-insensitively against the model's parameters."""
+    out: dict[str, float] = {}
+    lookup = {p.lower(): p for p in model.params}
+    for chunk in (c.strip() for c in (text or "").replace(";", ",").replace("\n", ",").split(",")):
+        if not chunk:
+            continue
+        if "=" not in chunk:
+            raise AnalysisError(
+                f"Could not read the constraint “{chunk}”. Write constraints as Name=value, "
+                f"for example “{model.params[0]}=0”.")
+        name, _, value = chunk.partition("=")
+        key = lookup.get(name.strip().lower())
+        if key is None:
+            raise AnalysisError(
+                f"“{name.strip()}” is not a parameter of “{model.name}”. "
+                f"Its parameters are: {', '.join(model.params)}.")
+        try:
+            val = float(value.strip().replace("−", "-"))
+        except ValueError:
+            raise AnalysisError(f"The constraint “{chunk}” needs a number after the equals sign.") from None
+        if not np.isfinite(val):
+            raise AnalysisError(f"The constraint “{chunk}” needs a finite number.")
+        out[key] = val
+    return out
+
+
+def constrain_model(model: Model, fixed: dict[str, float] | None) -> Model:
+    """A copy of ``model`` in which the parameters in ``fixed`` are constants."""
+    if not fixed:
+        return model
+    unknown = [k for k in fixed if k not in model.params]
+    if unknown:
+        raise AnalysisError(f"Unknown parameter(s) for “{model.name}”: {', '.join(unknown)}.")
+    free_idx = [i for i, p in enumerate(model.params) if p not in fixed]
+    if not free_idx:
+        raise AnalysisError("Every parameter is fixed, so there is nothing left to fit.")
+    template = [fixed.get(p, np.nan) for p in model.params]
+    for i, p in enumerate(model.params):
+        if p in fixed:
+            lo = model.lower[i] if model.lower is not None else -np.inf
+            hi = model.upper[i] if model.upper is not None else np.inf
+            if not (lo <= fixed[p] <= hi):
+                raise AnalysisError(f"{p} cannot be fixed to {fixed[p]:g} in “{model.name}” (outside its allowed range).")
+
+    def func(x, *free):
+        full = list(template)
+        for i, v in zip(free_idx, free):
+            full[i] = v
+        return model.func(x, *full)
+
+    def guess(x, y):
+        g = list(model.guess(x, y))
+        return [g[i] for i in free_idx]
+
+    eq = model.equation + "   [fixed: " + ", ".join(f"{k} = {v:g}" for k, v in fixed.items()) + "]"
+    return Model(id=model.id, name=model.name, equation=eq,
+                 params=[model.params[i] for i in free_idx], func=func, guess=guess,
+                 group=model.group, positive_x=model.positive_x,
+                 lower=None if model.lower is None else [model.lower[i] for i in free_idx],
+                 upper=None if model.upper is None else [model.upper[i] for i in free_idx],
+                 description=model.description, fixed=dict(fixed))
+
+
 @dataclass
 class Fit:
     model: Model
@@ -304,14 +376,22 @@ class Fit:
             return float("nan")
 
 
-def fit_model(model_id: str, x, y, weighting: str = "none", maxfev: int = 20000) -> Fit:
+def fit_model(model_id: str | Model, x, y, weighting: str = "none", maxfev: int = 20000,
+              fixed: dict[str, float] | None = None) -> Fit:
     """Least-squares fit of a built-in model.
 
-    ``weighting``: "none", "1/y" or "1/y2" (relative weighting, as in Prism).
+    ``weighting``: "none", "1/y" or "1/y2" (relative weighting; the weights
+    are computed from the observed Y values).
+    ``fixed``: parameters to hold constant, e.g. ``{"Bottom": 0, "Top": 100}``.
+    ``model_id`` may also be a :class:`Model` instance.
     """
-    if model_id not in MODELS:
+    if isinstance(model_id, Model):
+        m = model_id
+    elif model_id not in MODELS:
         raise AnalysisError(f"Unknown model: {model_id}")
-    m = MODELS[model_id]
+    else:
+        m = MODELS[model_id]
+    m = constrain_model(m, fixed)
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     keep = np.isfinite(x) & np.isfinite(y)
@@ -350,7 +430,7 @@ def fit_model(model_id: str, x, y, weighting: str = "none", maxfev: int = 20000)
         starts.append([v * float(rng.uniform(0.3, 3.0)) if v != 0 else float(rng.normal(0, 1)) for v in p0])
     best = None
     last_err: Exception | None = None
-    for s in starts:
+    for i_start, s in enumerate(starts):
         if bounds != (-np.inf, np.inf):
             s = [min(max(v, l + (1e-12 if np.isfinite(l) else 0)), h) for v, l, h in zip(s, bounds[0], bounds[1])]
         try:
@@ -366,7 +446,7 @@ def fit_model(model_id: str, x, y, weighting: str = "none", maxfev: int = 20000)
                 continue
             if best is None or ss < best[0] * (1 - 1e-9):
                 best = (ss, popt, pcov)
-            if best is not None and s is starts[0] and np.all(np.isfinite(pcov)):
+            if best is not None and i_start == 0 and np.all(np.isfinite(pcov)):
                 break   # the informed start converged cleanly; good enough
         except Exception as exc:  # RuntimeError (no convergence) / ValueError
             last_err = exc

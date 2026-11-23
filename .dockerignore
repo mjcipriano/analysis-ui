@@ -1,0 +1,6 @@
+**/node_modules
+**/.venv
+**/__pycache__
+backend/analysis_ui/static
+gallery_out
+.git

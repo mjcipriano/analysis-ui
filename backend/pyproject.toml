@@ -39,3 +39,4 @@ analysis_ui = ["shared/*.json", "sample_data/*", "r/**/*.R", "static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::FutureWarning", "ignore:.*keyword-only.*"]
